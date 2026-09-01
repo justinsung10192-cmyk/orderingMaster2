@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#173B62" />
+    <meta name="description" content="手機優先的班級訂午餐、錢包與取餐核對系統。" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="訂餐通" />
+    <title>班級訂午餐系統</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { ledger: '#173B62', apricot: '#F6A04D', stamp: '#0F6B5E', paper: '#F8F5EE', mist: '#EEF3F5' },
+            fontFamily: { sans: ['Noto Sans TC', 'sans-serif'], serif: ['Noto Serif TC', 'serif'] },
+            boxShadow: { paper: '0 12px 28px rgba(23, 59, 98, .10)', lift: '0 18px 42px rgba(23, 59, 98, .18)' }
+          }
+        }
+      };
+    </script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+      /* 校務手帳風格：紙張暖白、聯絡簿靛藍、可掃讀的任務卡及活頁孔節奏。 */
+      :root { color-scheme: light; }
+      * { -webkit-tap-highlight-color: transparent; }
+      body { margin: 0; min-width: 320px; background: #F8F5EE; color: #173B62; font-family: 'Noto Sans TC', sans-serif; }
+      button, input, textarea, select { font: inherit; }
+      button:active { transform: scale(.975); }
+      .safe-top { padding-top: max(1rem, env(safe-area-inset-top)); }
+      .safe-bottom { padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
+      .notebook-lines { background-image: linear-gradient(rgba(23,59,98,.045) 1px, transparent 1px); background-size: 100% 28px; }
+      .binder-edge { position: relative; }
+      .binder-edge:before { content: ''; position: absolute; top: 18px; bottom: 18px; left: 12px; width: 7px; border-radius: 999px; background: radial-gradient(circle, #F8F5EE 0 3px, transparent 3.5px) 0 0 / 7px 28px; z-index: 1; }
+      .auth-ledger-card { border: 1px solid rgba(23,59,98,.10); box-shadow: 14px 14px 0 rgba(23,59,98,.07), 0 18px 40px rgba(23,59,98,.16); }
+      .auth-ledger-card:after { content: '午間作業單'; position: absolute; right: 20px; top: 93px; color: rgba(23,59,98,.52); font-size: 10px; font-weight: 800; letter-spacing: .15em; transform: rotate(-2deg); }
+      .task-rule { border-top: 1px dashed rgba(23,59,98,.18); }
+      .brand-plate { position: relative; isolation: isolate; }
+      .brand-plate:before { content: ''; position: absolute; left: -5px; top: 7px; height: 28px; width: 6px; background: radial-gradient(circle, #173B62 0 2.2px, transparent 2.7px) 0 0 / 6px 13px; opacity: .7; }
+      .status-stamp { letter-spacing: .08em; text-transform: uppercase; font-weight: 800; font-size: 10px; border: 1px solid currentColor; transform: rotate(-2deg); }
+      .scroll-hide::-webkit-scrollbar { display: none; }
+      .scroll-hide { scrollbar-width: none; }
+      .view-enter { animation: enter .22s cubic-bezier(.23,1,.32,1); }
+      @keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      .modal-enter { animation: modal .24s cubic-bezier(.23,1,.32,1); }
+      @keyframes modal { from { opacity: 0; transform: scale(.96) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+      @media (prefers-reduced-motion: reduce) { *, *:before, *:after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="min-h-dvh"></div>
+
+    <template id="auth-template">
+      <main class="min-h-dvh bg-paper relative overflow-hidden">
+        <div class="absolute inset-x-0 top-0 h-[34%] bg-ledger"></div>
+        <div class="absolute -right-20 top-16 h-52 w-52 rounded-full bg-apricot/20 blur-3xl"></div>
+        <section class="safe-top relative mx-auto flex min-h-dvh max-w-md flex-col px-5 pb-6">
+          <div class="flex items-center gap-3 pt-2 text-white">
+            <span class="brand-plate grid h-14 w-14 place-items-center rounded-2xl border border-white/20 bg-white/10"><img src="/images/lunch-ledger-brand-mark.webp" alt="班級訂午餐系統" class="h-11 w-11" /></span>
+            <div><p class="font-serif text-xl font-black tracking-wide">班級訂午餐</p><p class="text-xs text-blue-100">午間事務，清楚完成</p></div>
+          </div>
+          <div class="auth-ledger-card binder-edge relative mt-7 overflow-hidden rounded-[1.15rem] bg-white">
+            <div class="absolute inset-x-0 top-0 h-28 border-b border-dashed border-ledger/15 bg-[url('/images/lunch-ledger-login-hero.webp')] bg-cover bg-[75%_50%]"></div>
+            <div class="relative px-7 pb-7 pt-24">
+              <div id="auth-content"></div>
+            </div>
+          </div>
+          <p class="mt-auto border-t border-dashed border-white/20 pt-5 text-center text-xs leading-5 text-blue-100">使用校務信箱登入，即表示您同意依班級規範使用本系統。</p>
+        </section>
+      </main>
+    </template>
+
+    <template id="shell-template">
+      <div class="min-h-dvh bg-paper pb-24">
+        <header class="safe-top sticky top-0 z-30 border-b border-ledger/5 bg-paper/95 px-4 pb-3 backdrop-blur-lg">
+          <div class="mx-auto flex max-w-3xl items-center justify-between">
+            <button data-nav="lunch" class="flex items-center gap-2 text-left" aria-label="回到訂餐頁面">
+              <span class="brand-plate grid h-11 w-11 place-items-center rounded-xl bg-ledger"><img src="/images/lunch-ledger-brand-mark.webp" alt="" class="h-9 w-9" /></span>
+              <div><p class="font-serif text-base font-black leading-5">班級訂午餐</p><p id="header-subtitle" class="text-[11px] text-slate-500">我的午餐手帳</p></div>
+            </button>
+            <button data-nav="settings" class="flex items-center gap-2 rounded-full bg-white px-2 py-1.5 shadow-sm ring-1 ring-ledger/5" aria-label="開啟個人設定">
+              <span id="avatar" class="grid h-7 w-7 place-items-center rounded-full bg-ledger text-xs font-bold text-white"></span>
+              <span id="header-wallet" class="pr-1 text-xs font-bold tabular-nums text-stamp"></span>
+            </button>
+          </div>
+        </header>
+        <div id="api-banner" class="hidden mx-auto max-w-3xl px-4 pt-3"></div>
+        <main id="view" class="mx-auto max-w-3xl px-4 py-5"></main>
+        <nav class="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-ledger/10 bg-white/95 px-2 pt-2 backdrop-blur-xl">
+          <div id="main-nav" class="mx-auto flex max-w-md items-center justify-around"></div>
+        </nav>
+      </div>
+      <div id="modal-root"></div>
+      <div id="toast-root" class="pointer-events-none fixed inset-x-0 top-4 z-[70] mx-auto flex max-w-sm flex-col gap-2 px-4"></div>
+    </template>
+
+    <template id="lunch-view">
+      <section class="view-enter space-y-5">
+        <div class="binder-edge overflow-hidden rounded-[1.5rem] bg-ledger px-7 py-6 text-white shadow-paper">
+          <div class="absolute inset-0 bg-[url('/images/lunch-ledger-dashboard-hero.webp')] bg-cover bg-center opacity-[.17] mix-blend-screen"></div>
+          <div class="relative"><p class="text-xs font-bold tracking-[.16em] text-blue-200">TODAY'S NOTE</p><h1 id="lunch-greeting" class="mt-1 font-serif text-2xl font-black"></h1><p id="lunch-summary" class="mt-2 text-sm leading-6 text-blue-100"></p></div>
+        </div>
+        <div id="session-tabs" class="scroll-hide -mx-4 flex gap-2 overflow-x-auto px-4 pb-1"></div>
+        <div id="lunch-content"></div>
+      </section>
+    </template>
+
+    <template id="verify-view">
+      <section class="view-enter space-y-5">
+        <div class="overflow-hidden rounded-[1.5rem] bg-white shadow-paper ring-1 ring-ledger/5">
+          <div class="relative min-h-32 overflow-hidden px-6 py-5 text-white"><img src="/images/lunch-ledger-qr-card.webp" alt="" class="absolute inset-0 h-full w-full object-cover opacity-90" /><div class="absolute inset-0 bg-ledger/75"></div><div class="relative"><p class="text-xs font-bold tracking-[.15em] text-blue-100">VERIFICATION PASS</p><h1 class="mt-1 font-serif text-2xl font-black">出示你的午餐通行證</h1><p class="mt-1 text-sm text-blue-100">每組 QR 與 PIN 皆會在 5 分鐘後失效。</p></div></div>
+          <div id="verify-content" class="p-5"></div>
+        </div>
+      </section>
+    </template>
+
+    <template id="wallet-view">
+      <section class="view-enter space-y-5">
+        <div class="rounded-[1.5rem] bg-stamp px-6 py-6 text-white shadow-paper"><p class="text-xs font-bold tracking-[.15em] text-emerald-100">STORED VALUE</p><div class="mt-2 flex items-end justify-between"><div><p class="text-sm text-emerald-100">目前儲值餘額</p><p id="wallet-balance" class="mt-1 font-serif text-4xl font-black tabular-nums"></p></div><span class="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">我的錢包</span></div><p id="wallet-unpaid" class="mt-4 border-t border-white/15 pt-3 text-sm text-emerald-50"></p></div>
+        <section><div class="mb-3 flex items-center justify-between"><h1 class="font-serif text-xl font-black">交易紀錄</h1><button data-action="refresh-wallet" class="text-xs font-bold text-ledger underline underline-offset-4">重新整理</button></div><div id="transaction-list" class="space-y-2"></div></section>
+        <section><div class="mb-3 flex items-center justify-between"><h1 class="font-serif text-xl font-black">歷史訂單</h1></div><div id="wallet-orders" class="space-y-2"></div></section>
+      </section>
+    </template>
+
+    <template id="admin-view">
+      <section class="view-enter space-y-5">
+        <div class="overflow-hidden rounded-[1.5rem] bg-ledger text-white shadow-paper"><div class="relative px-6 py-6"><img src="/images/lunch-ledger-dashboard-hero.webp" alt="" class="absolute inset-0 h-full w-full object-cover opacity-20" /><div class="relative"><p class="text-xs font-bold tracking-[.15em] text-blue-200">ADMIN DESK</p><h1 class="mt-1 font-serif text-2xl font-black">今日核對單</h1><p class="mt-1 text-sm text-blue-100">訂單、取餐、收款與儲值都在同一張工作頁。</p></div></div></div>
+        <div id="admin-tabs" class="scroll-hide flex gap-2 overflow-x-auto pb-1"></div>
+        <div id="admin-content"></div>
+      </section>
+    </template>
+
+    <template id="settings-view">
+      <section class="view-enter space-y-5">
+        <div class="rounded-[1.5rem] bg-white p-5 shadow-paper ring-1 ring-ledger/5"><div class="flex items-center gap-4"><span id="settings-avatar" class="grid h-14 w-14 place-items-center rounded-2xl bg-ledger text-xl font-black text-white"></span><div><h1 id="settings-name" class="font-serif text-xl font-black"></h1><p id="settings-meta" class="mt-1 text-sm text-slate-500"></p></div></div><div class="mt-5 grid grid-cols-2 gap-2"><div class="rounded-xl bg-mist px-3 py-3"><p class="text-[11px] font-bold text-slate-500">儲值餘額</p><p id="settings-balance" class="mt-1 font-bold tabular-nums text-stamp"></p></div><div class="rounded-xl bg-mist px-3 py-3"><p class="text-[11px] font-bold text-slate-500">帳號權限</p><p id="settings-role" class="mt-1 font-bold text-ledger"></p></div></div></div>
+        <div class="overflow-hidden rounded-[1.35rem] bg-white shadow-paper ring-1 ring-ledger/5"><button data-action="toggle-notifications" class="flex w-full items-center justify-between px-5 py-4 text-left"><span><span class="block font-bold">手機通知</span><span id="notification-status" class="mt-1 block text-xs text-slate-500">檢查中…</span></span><span id="notification-switch" class="grid h-6 w-11 shrink-0 place-items-center rounded-full bg-slate-200 transition"><span class="h-4 w-4 rounded-full bg-white shadow"></span></span></button><div class="mx-5 h-px bg-slate-100"></div><button data-action="install-app" id="install-app-button" class="hidden w-full items-center justify-between px-5 py-4 text-left"><span><span class="block font-bold">釘選到桌面</span><span class="mt-1 block text-xs text-slate-500">像 App 一樣使用，通知更可靠。</span></span><span class="text-ledger">›</span></button><div class="mx-5 h-px bg-slate-100"></div><button data-action="logout" class="flex w-full items-center justify-between px-5 py-4 text-left text-red-600"><span><span class="block font-bold">登出</span><span class="mt-1 block text-xs text-red-400">清除本機的登入憑證。</span></span><span>›</span></button></div>
+      </section>
+    </template>
+
+    <template id="scanner-modal-template">
+      <div class="fixed inset-0 z-50 flex items-end bg-ledger/60 p-3 sm:items-center sm:justify-center"><section class="modal-enter w-full max-w-md overflow-hidden rounded-[1.5rem] bg-white shadow-lift"><div class="flex items-center justify-between px-5 py-4"><div><p class="text-[11px] font-bold tracking-[.13em] text-slate-500">CAMERA SCANNER</p><h2 id="scanner-title" class="font-serif text-xl font-black"></h2></div><button data-action="close-scanner" class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl" aria-label="關閉">×</button></div><div id="qr-reader" class="mx-4 overflow-hidden rounded-xl bg-slate-100"></div><div class="px-5 py-4"><p id="scanner-help" class="text-sm leading-6 text-slate-600"></p><div class="mt-3 flex gap-2"><input id="manual-qr" class="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-ledger" placeholder="相機無法使用？貼上 QR JSON" /><button data-action="submit-manual-qr" class="rounded-xl bg-ledger px-3 text-xs font-bold text-white">驗證</button></div><div class="mt-2 flex gap-2"><input id="manual-pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" class="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-center text-lg font-black tracking-[.3em] outline-none focus:border-ledger" placeholder="或輸入 6 位 PIN" /><button data-action="submit-pin" class="rounded-xl bg-stamp px-3 text-xs font-bold text-white">PIN 驗證</button></div></div></section></div>
+    </template>
+
+    <template id="confirm-modal-template">
+      <div class="fixed inset-0 z-50 flex items-end bg-ledger/60 p-3 sm:items-center sm:justify-center"><section class="modal-enter w-full max-w-md rounded-[1.5rem] bg-white p-5 shadow-lift"><p id="confirm-eyebrow" class="text-[11px] font-bold tracking-[.13em] text-slate-500"></p><h2 id="confirm-title" class="mt-1 font-serif text-xl font-black"></h2><div id="confirm-body" class="mt-3 text-sm leading-6 text-slate-600"></div><div class="mt-5 flex gap-2"><button data-action="close-modal" class="flex-1 rounded-xl bg-mist px-4 py-3 text-sm font-bold text-ledger">取消</button><button id="confirm-submit" class="flex-1 rounded-xl bg-ledger px-4 py-3 text-sm font-bold text-white">確認</button></div></section></div>
+    </template>
+
+    <script>
+      window.LUNCH_CONFIG = {
+        // 在 Vercel 與本機 Vite 預覽時均由同網域代理轉送，避免瀏覽器跨網域限制。
+        apiUrl: '/api/gas',
+        appName: '班級訂午餐系統'
+      };
+    </script>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
