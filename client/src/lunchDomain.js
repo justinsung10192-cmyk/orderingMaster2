@@ -32,9 +32,11 @@ function dateString(d) {
 
 export function weekLabelOf(dateInput) {
   const monday = new Date(`${mondayOf(dateInput)}T00:00:00`);
-  const year = monday.getFullYear();
-  const week = Math.ceil((((monday - new Date(year, 0, 1)) / 86400000) + 1) / 7);
-  return `${year}-W${week}`;
+  const jan1 = new Date(monday.getFullYear(), 0, 1);
+  const firstMonday = new Date(jan1);
+  firstMonday.setDate(jan1.getDate() + (1 - jan1.getDay()));
+  const week = Math.floor((monday - firstMonday) / (7 * 86400000)) + 1;
+  return `${monday.getFullYear()}-W${week}`;
 }
 
 export function nextWeekLabel() {

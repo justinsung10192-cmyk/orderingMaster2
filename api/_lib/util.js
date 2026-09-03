@@ -91,12 +91,15 @@ function todayStringOffset(d) {
   return `${year}-${month}-${day}`;
 }
 
-// 某日所屬的 ISO 週標籤，例：'2026-W37'
+// 某日所屬的週標籤，例：'2026-W37'（與 weekDates 同一基準，避免年初偏移）
 export function weekLabelOf(dateInput = new Date()) {
-  const monday = new Date(mondayOf(dateInput));
-  const year = monday.getFullYear();
-  const week = Math.ceil((((monday - new Date(year, 0, 1)) / 86400000) + 1) / 7);
-  return `${year}-W${week}`;
+  const [y, m, d] = mondayOf(dateInput).split('-').map(Number);
+  const monday = new Date(y, m - 1, d); // 本地時區午夜
+  const jan1 = new Date(monday.getFullYear(), 0, 1);
+  const firstMonday = new Date(jan1);
+  firstMonday.setDate(jan1.getDate() + (1 - jan1.getDay()));
+  const week = Math.floor((monday - firstMonday) / (7 * 86400000)) + 1;
+  return `${monday.getFullYear()}-W${week}`;
 }
 
 // 下週標籤（下週一所在的週）
