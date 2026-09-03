@@ -1,7 +1,15 @@
-// 動作：錢包歷史、管理員儲值、現金結清
+// 動作：錢包歷史、管理員儲值、現金結清、餘額手動調整
 import { appError, sid, num, round2 } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, callRpc, listStoresForClass } from '../_lib/db.js';
 import { publicUser, outstandingOf } from '../_lib/serialize.js';
+
+const KIND_LABEL = {
+  TopUp: '儲值',
+  Wallet: '訂餐扣款',
+  Cash: '現金',
+  Refund: '退款',
+  Manual: '手動調整',
+};
 
 export const actions = {
   async getWalletHistory(_data, ctx) {
@@ -12,37 +20,42 @@ export const actions = {
       orderAscending: false,
       limit: 200,
     });
-    const orders = await listRows('orders', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
-    const cashUnpaid = round2(orders.filter(o => !o.is_deleted).reduce((sum, order) => sum + outstandingOf(order), 0));
+    const allOrders = await listRows('orders', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
+    const activeOrders = allOrders.filter((order) => !order.is_deleted);
+    const cashUnpaid = round2(activeOrders.reduce((sum, order) => sum + outstandingOf(order), 0));
     const freshUser = await findOne('users', { id: ctx.user.id });
 
-    const recentOrders = await listRows('orders', { classId: ctx.classId, filters: { user_id: ctx.user.id }, order: 'created_at', orderAscending: false, limit: 20 });
-    const recentSessionIds = [...new Set(recentOrders.map(order => order.session_id))];
-    const recentSessions = recentSessionIds.length ? await listRowsIn('sessions', 'id', recentSessionIds, { classId: ctx.classId }) : [];
-    const recentSessionById = new Map(recentSessions.map(session => [String(session.id), session]));
-    const recentStores = await listStoresForClass(ctx.classId);
-    const recentStoreById = new Map(recentStores.map(store => [String(store.id), store]));
+    const sessionIds = [...new Set(activeOrders.map((order) => order.session_id))];
+    const sessions = sessionIds.length ? await listRowsIn('sessions', 'id', sessionIds, { classId: ctx.classId }) : [];
+    const sessionById = new Map(sessions.map((session) => [String(session.id), session]));
+    const stores = await listStoresForClass(ctx.classId);
+    const storeById = new Map(stores.map((store) => [String(store.id), store]));
+
+    const recentOrders = activeOrders
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 30);
 
     return {
       user: publicUser(freshUser),
       cashUnpaid,
-      transactions: transactions.map(transaction => ({
-        type: transaction.kind,
+      transactions: transactions.map((transaction) => ({
+        type: KIND_LABEL[transaction.kind] || transaction.kind,
         amount: num(transaction.amount),
+        note: transaction.note || '',
         timestamp: transaction.created_at,
       })),
-      orders: recentOrders.map(order => {
-        const session = recentSessionById.get(String(order.session_id));
+      orders: recentOrders.map((order) => {
+        const session = sessionById.get(String(order.session_id));
+        const store = session ? storeById.get(String(session.store_id)) : null;
         return {
           orderId: sid(order.id),
           sessionId: sid(order.session_id),
           orderDate: session?.order_date || '',
-          storeName: (session && recentStoreById.get(String(session.store_id))?.name) || '未指定店家',
-          itemName: (order.items || []).map(item => `${Number(item.quantity) > 1 ? `${Number(item.quantity)}×` : ''}${item.itemName}`).join('、'),
+          storeName: store?.name || '未指定店家',
+          itemName: (order.items || []).map((item) => `${Number(item.quantity) > 1 ? `${Number(item.quantity)}×` : ''}${item.itemName}`).join('、'),
           totalPrice: num(order.total_price),
           paymentStatus: order.payment_status,
           pickupStatus: order.pickup_status,
-          isDeleted: order.is_deleted,
         };
       }),
     };
@@ -78,5 +91,20 @@ export const actions = {
       p_order_ids: orderIds,
     });
     return { ok: true, settled: num(result.settled) };
+  },
+
+  async adminManualBalance(data, ctx) {
+    const amount = Number(data.amount);
+    if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 100000) throw appError('INVALID_INPUT', '請輸入正確的調整金額。');
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    const note = String(data.note || '').slice(0, 120) || '餘額手動調整';
+    const result = await callRpc('fn_manual_balance', {
+      p_class_id: ctx.classId,
+      p_user_id: target.id,
+      p_amount: amount,
+      p_note: note,
+    });
+    return { ok: true, walletBalance: num(result.wallet_balance) };
   },
 };

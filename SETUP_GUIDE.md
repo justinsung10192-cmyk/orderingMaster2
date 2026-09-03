@@ -1,30 +1,28 @@
-# 建置步驟（約 30–40 分鐘，照順序做）
+# 建置步驟（約 20–30 分鐘，照順序做）
 
-> 目標：Vercel（前端＋API）＋ Supabase（資料庫）＋ Gmail SMTP（Email）＋ Web Push（手機通知）。
-> 舊的 Google 試算表／Apps Script 不再需要；既有資料不保留，全新開始。
+> 目標：Vercel（前端＋API）＋ Supabase（資料庫）＋ Web Push（手機通知）＋ AI 菜單辨識（選用）。
 
 ---
 
-## 第 1 步：建立 Supabase 專案（約 10 分鐘）
+## 第 1 步：建立 Supabase 專案（約 5 分鐘）
 
-1. 到 https://supabase.com 註冊（免費）→ **New project**
-   - Name：`class-lunch`，密碼自訂並**保存**，Region 選最接近你的（如 Singapore / Tokyo）
-2. 建立後，到 **SQL Editor**，把 `supabase/schema.sql` 的內容**整段貼上執行**（建立資料表＋金流函式）
-3. 到 **Project Settings → API** 複製兩樣東西：
+> ⚠️ **請使用「全新的 Supabase 專案」**，不要沿用舊版（v2 商家/學校/開發者版）的資料庫。舊資料不保留，全新開始。
+
+1. 到 https://supabase.com 註冊（免費）→ **New project**（Region 選最接近你的，如 Singapore / Tokyo）
+2. 建立後，到 **SQL Editor**，把 `supabase/schema.sql` 的內容**整段貼上執行**。
+   - 這會建立所有資料表、金流函式，並**自動建立 demo 班級 + 37 組預設帳號 + 示範店家/菜單**。
+3. 到 **Project Settings → API** 複製兩樣：
    - `Project URL`（形如 `https://xxxx.supabase.co`）
    - `service_role` key（形如 `eyJ...`，**等同資料庫管理員權限，只放伺服器端**）
-4. 到 **Project Settings → Database → Connection string**（選 **Transaction pooler**）複製備用（本機測試時用）
 
 ## 第 2 步：產生 VAPID 金鑰（推播用）
-
-在專案資料夾本機執行（已安裝 Node 的話）：
 
 ```bash
 npm install
 npm run generate:vapid
 ```
 
-會印出兩行 `VAPID_PUBLIC_KEY=...` 與 `VAPID_PRIVATE_KEY=...`，留著下一步用。
+印出 `VAPID_PUBLIC_KEY=` 與 `VAPID_PRIVATE_KEY=`，留著下一步用。
 
 ## 第 3 步：部署到 Vercel
 
@@ -35,49 +33,26 @@ npm run generate:vapid
 | 變數 | 值 |
 | --- | --- |
 | `SUPABASE_URL` | 第 1 步的 Project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | 第 1 步的 service_role key（新版介面為 Secret key） |
-| `APP_URL` | 你的 Vercel 網址（如 `https://class-lunch.vercel.app`，不加斜線） |
-| `SMTP_HOST` | `smtp.gmail.com` |
-| `SMTP_PORT` | `465` |
-| `SMTP_USER` | 你的 Gmail 帳號（第 4 步） |
-| `SMTP_PASS` | Gmail 應用程式密碼 16 碼（第 4 步） |
-| `EMAIL_FROM` | 如 `訂餐通 <你的gmail@gmail.com>`（必須與 SMTP_USER 同一帳號） |
+| `SUPABASE_SERVICE_ROLE_KEY` | 第 1 步的 service_role key |
+| `APP_URL` | 你的 Vercel 網址（如 `https://class-meal.vercel.app`，不加斜線） |
 | `VAPID_PUBLIC_KEY` | 第 2 步產生 |
 | `VAPID_PRIVATE_KEY` | 第 2 步產生 |
 | `CRON_SECRET` | 自訂一串隨機字元（排程保護用） |
-| `DEVELOPER_MASTER_KEY` | 自訂另一串隨機字元（開發者註冊用） |
+| `GEMINI_API_KEY` | （選用）AI 菜單辨識，https://aistudio.google.com/apikey |
+| `OPENAI_API_KEY` | （選用）AI 菜單辨識，Gemini 未設定時自動改用 |
 
 4. 按 **Deploy**，等建置完成。
 
-## 第 4 步：Email（Gmail SMTP，免費、免網域，只有驗證信／重設信）
-
-1. 用你的 Gmail 帳號：
-   - 到「Google 帳戶 → 安全性」開啟**兩步驟驗證**
-   - 搜尋「**應用程式密碼**」→ 新增（選「郵件」）→ 得到 16 碼密碼（記下來）
-2. 把以下值填入 Vercel 環境變數：
-
-| 變數 | 值 |
-| --- | --- |
-| `SMTP_HOST` | `smtp.gmail.com` |
-| `SMTP_PORT` | `465` |
-| `SMTP_USER` | 你的 Gmail 帳號 |
-| `SMTP_PASS` | 16 碼應用程式密碼（不含空格） |
-| `EMAIL_FROM` | `訂餐通 <你的gmail@gmail.com>`（必須是同一帳號） |
-
-3. 重新部署後，管理員可到「管理 → 系統設定」看郵件狀態是否正常。
-
-## 第 5 步：啟用截止提醒排程（選用）
+## 第 4 步：啟用排程（截止提醒 / 催繳推播，選用但建議）
 
 部署完成後，到 Supabase **SQL Editor** 執行（把網址與 CRON_SECRET 換成你的）：
 
 ```sql
--- 先啟用擴充（只需一次）
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
--- 再建立排程
 select cron.schedule(
-  'cutoff-reminders',
+  'meal-reminders',
   '0 * * * *',
   $$ select net.http_post(
        url := 'https://你的-app.vercel.app/api/cron?secret=你的CRON_SECRET',
@@ -87,63 +62,43 @@ select cron.schedule(
 );
 ```
 
-> 若報 `schema "cron" does not exist`：表示 pg_cron 未啟用，先執行上面的 `create extension` 再試。
-> 若報 `schema "net" does not exist`：表示 pg_net 未啟用，同樣先執行 `create extension`。
+移除排程：`select cron.unschedule('meal-reminders');`
 
-移除排程：`select cron.unschedule('cutoff-reminders');`
+## 第 5 步：登入與初始設定
 
-> **升級提醒**：若你的 Supabase 已執行過舊版 schema.sql（還沒有 `pin_hash` 欄位），請在 SQL Editor 額外執行：
-> ```sql
-> alter table public.verification_records add column if not exists pin_hash text not null default '';
-> ```
+**37 組預設帳號**：座號 `01`～`37`，預設密碼一律 `lunch1234`。
 
-> **升級提醒 2**：開發者信箱驗證與登入封鎖功能需要以下欄位，請額外執行：
-> ```sql
-> alter table public.developers add column if not exists email_verified boolean not null default false;
-> alter table public.developers add column if not exists blocked_until timestamptz;
-> alter table public.auth_tokens add column if not exists developer_id bigint references public.developers(id) on delete cascade;
-> ```
-> **升級提醒 3**：全體共用菜單與店家資訊需要以下欄位，請額外執行：
-> ```sql
-> alter table public.stores add column if not exists description text not null default '';
-> alter table public.stores add column if not exists contact text not null default '';
-> alter table public.stores add column if not exists is_global boolean not null default false;
-> ```
+1. 用座號 `01` 登入（預設為**管理者**）。
+2. 首次登入會強制要求設定**姓名**與**新密碼**，完成後即可進入系統。
+3. 其他同學以各自座號登入，同樣需設定姓名與密碼。
 
-## 第 6 步：建立第一個帳號（開發者）
+> 變更密碼後請記得：預設密碼 `lunch1234` 僅供第一次登入使用。
 
-1. 打開你的 Vercel 網址 → 登入頁最下方「**開發者入口**」→「註冊開發者帳號」
-2. 輸入帳號／Email／密碼／**開發者金鑰**（＝Vercel 的 `DEVELOPER_MASTER_KEY`）
-3. 登入開發者工作台 →「**核發代碼**」→ 輸入班級名稱（例如「三年甲班」）→ 彈出**班級管理者代碼**視窗（有「複製代碼」「分享」按鈕，**確認已複製才能關閉**）
-4. 回到一般登入頁 →「註冊帳號」→ 填學號／座號／姓名／Email／密碼，**班級管理者代碼欄**貼上第 3 步的代碼
-5. 收信輸入驗證碼 → 登入 → 此帳號即為**管理員**（可建立場次、菜單、掃碼、儲值）
+## 第 6 步：管理者初始化菜單與排程
 
-## 第 7 步：學生加入（邀請碼）
+1. 進入「**管理 → 菜單**」：新增店家 → 手動新增品項，或按「**📷 AI 辨識菜單**」拍照/上傳，AI 會自動抓品項與價格，確認後寫入。
+2. 進入「**管理 → 排程**」：切換到「下週」，逐日新增場次（店家 + 截止時間），需要放假的日子標記「放假」。
+3. 排定後按「**一鍵公布本週**」→ 學生即可開始訂餐（會推播通知）。
 
-1. 管理員 → 管理 →「設定」→「產生邀請碼」→ 彈出**邀請碼視窗**（有「複製代碼」「分享」按鈕，可直接分享到 LINE／Messenger 等，確認已複製才能關閉）
-2. 學生註冊時在「邀請碼」欄貼上即可（一般使用者）
-3. 學生登入後 → 右上角頭像（設定）→「**手機通知**」開啟 → 依提示把網站**釘選到桌面**（「釘選到桌面」會顯示逐步引導，iPhone：Safari「加入主畫面」；Android：Chrome「加到主畫面」）
+## 第 7 步：學生使用
 
-## 第 8 步：更換班級管理者
+1. 學生登入後於「**訂餐**」頁依「週別 → 日期 → 店家」資料夾找到場次，點入下單（多品項、數量、客製選項）。
+2. 「**投票**」頁每週 3 票，投給下週想吃的店家。
+3. 「**錢包**」頁可查看餘額、交易紀錄，並「出示取餐 QR / PIN」。
+4. 「**設定**」頁開啟「**手機通知**」並依提示把網站**釘選到桌面**（iPhone：Safari「加入主畫面」；Android：Chrome「加到主畫面」）。
 
-1. 現任管理者 → 管理 →「帳號」分頁
-2. 找到要升為管理者的學生 → 按「**設為管理**」
-3. 班級有第二位管理者後，即可對另一位管理者按「**移除管理**」（系統保證至少保留一位管理者）
+## 第 8 步：管理者核銷與收款
 
-## 第 8 步：上線檢查
-
-```bash
-# 本機有 Node 的話：
-API_BASE=https://你的-app.vercel.app/api/gas node scripts/smoke-test.js
-```
-
-接著實際測試：建立店家與餐點 → 建立場次 → 學生下單（純儲值／混合）→ QR 取餐 → 儲值抵欠款 → 匯出 CSV。
-
----
+1. 「**管理 → 核銷**」：掃學生 QR 或輸入 4 位 PIN，即可：
+   - **儲值**：輸入金額，系統先抵最舊欠款、剩餘入錢包。
+   - **扣款結帳**：現金結清未繳訂單。
+   - **取餐標記**：標記今日訂單為已取餐。
+2. 「**管理 → 總覽**」：當日訂單匯總，一鍵「**匯出 CSV**」。
+3. 「**管理 → 設定 → 欠繳催繳名單**」：查看超過星期一仍未繳費名單，一鍵「複製文字明細」貼至班級群組；系統每日自動發送催繳推播。
 
 ## 常見問題
 
-- **手機收不到通知？** ① 需用 Chrome／Edge 並允許通知權限；② iPhone 需 iOS 16.4+ 且加入主畫面；③ 檢查 VAPID 金鑰是否已設定；④ 通知只會送到「已開啟通知」的裝置。
-- **Email 寄不出去？** ① 確認 Gmail 已開「兩步驟驗證」並產生「應用程式密碼」（一般登入密碼不行）；② `SMTP_PASS` 為 16 碼、不含空格；③ `EMAIL_FROM` 必須是同一 Gmail 帳號；④ 管理員 →「系統設定」可看郵件狀態。Gmail SMTP 每日約 500 封上限（驗證信足夠）。
-- **資料庫會休眠？** Supabase 免費層閒置 7 天才休眠；學生天天使用不會觸發，喚醒只要幾秒。
-- **免費配額夠嗎？** 一個班級（50 人）每天數百次 API 呼叫，遠低於免費層上限。
+- **手機收不到通知？** ① 需用 Chrome／Edge 並允許通知權限；② iPhone 需 iOS 16.4+ 且「加入主畫面」；③ 確認 VAPID 金鑰已設定；④ 通知只會送到「已開啟通知」的裝置。
+- **AI 辨識失敗？** ① 確認已設定 `GEMINI_API_KEY` 或 `OPENAI_API_KEY`；② 照片務必清晰、正對菜單；③ 若完全辨識不到會回傳空清單，可改手動新增。
+- **純儲值模式**：於「管理 → 設定」開啟；開啟後學生餘額不足即無法送出訂單。
+- **免費配額夠嗎？** 一個班級（37 人）每天數百次 API 呼叫，遠低於免費層上限；Gemini 1.5 Flash 免費層亦足夠日常使用。

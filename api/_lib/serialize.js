@@ -1,6 +1,6 @@
-// 序列化層：把資料庫列轉成前端需要的 JSON 格式（所有 id 字串化）
+// 序列化層：把資料庫列轉成前端 JSON（所有 id 字串化）
 import { sid, num, round2, todayString } from './util.js';
-import { supabase, listRows, listRowsIn, findOne, listStoresForClass, findStoreForClass } from './db.js';
+import { supabase, findOne, listRows, listRowsIn, listMenuItemsForStore, listStoresForClass } from './db.js';
 
 export function publicUser(user) {
   return {
@@ -9,10 +9,11 @@ export function publicUser(user) {
     studentName: user.student_name,
     studentNo: user.student_no,
     seatNo: user.seat_no,
-    email: user.email,
+    email: user.email || '',
     role: user.role,
     walletBalance: num(user.wallet_balance),
-    authVersion: num(user.auth_version),
+    mustChangePassword: Boolean(user.must_change_password),
+    isDisabled: Boolean(user.is_disabled),
   };
 }
 
@@ -26,7 +27,7 @@ export function itemNameOf(order) {
 export function selectedOptionsOf(order) {
   const items = Array.isArray(order.items) ? order.items : [];
   if (items.length !== 1) return [];
-  return (items[0].selectedOptions || []).map(option => ({ name: option.name }));
+  return (items[0].options || []).map((option) => ({ name: option.name, price: num(option.price) }));
 }
 
 export function outstandingOf(order) {
@@ -38,12 +39,12 @@ export function publicOrder(order) {
   return {
     orderId: sid(order.id),
     sessionId: sid(order.session_id),
-    items: (Array.isArray(order.items) ? order.items : []).map(item => ({
+    items: (Array.isArray(order.items) ? order.items : []).map((item) => ({
       itemId: sid(item.itemId),
       itemName: item.itemName,
       quantity: num(item.quantity),
       unitPrice: num(item.unitPrice),
-      selectedOptions: (item.selectedOptions || []).map(option => ({ optionId: sid(option.optionId), name: option.name })),
+      options: (item.options || []).map((option) => ({ name: option.name, price: num(option.price) })),
     })),
     totalPrice: num(order.total_price),
     priorPaid: num(order.prior_paid),
@@ -54,13 +55,15 @@ export function publicOrder(order) {
   };
 }
 
-// 重新由資料庫計算訂單金額（不信任前端傳來的金額）
+// 由資料庫重新計算訂單金額（不信任前端傳來的金額）
+// menuItems: [{itemId, name, price, options:[{name,price}]}]
+// selections: [{itemId, quantity, optionIndexes:[number]}]
 export function computeOrderItems(menuItems, selections) {
   if (!Array.isArray(selections) || !selections.length) throw new Error('請至少選擇一項餐點。');
   if (selections.length > 20) throw new Error('單次最多可選擇 20 項餐點。');
-  const byId = new Map(menuItems.map(item => [String(item.itemId ?? item.id), item]));
+  const byId = new Map(menuItems.map((item) => [String(item.itemId), item]));
   const used = new Set();
-  const items = selections.map(selection => {
+  const items = selections.map((selection) => {
     const itemId = String(selection?.itemId || '');
     const quantity = Number(selection?.quantity);
     const item = byId.get(itemId);
@@ -68,15 +71,15 @@ export function computeOrderItems(menuItems, selections) {
     if (used.has(itemId)) throw new Error('相同餐點請直接調整數量。');
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) throw new Error('每項餐點數量須為 1–99。');
     used.add(itemId);
-    const optionIds = Array.isArray(selection?.optionIds) ? selection.optionIds.map(String) : [];
-    if (new Set(optionIds).size !== optionIds.length) throw new Error('客製選項不可重複選擇。');
-    const optionsById = new Map((item.options || []).map(option => [String(option.optionId ?? option.id), option]));
-    const selectedOptions = optionIds.map(optionId => {
-      const option = optionsById.get(optionId);
+    const optionIndexes = Array.isArray(selection?.optionIndexes) ? selection.optionIndexes.map(Number) : [];
+    if (new Set(optionIndexes).size !== optionIndexes.length) throw new Error('客製選項不可重複選擇。');
+    const options = Array.isArray(item.options) ? item.options : [];
+    const chosen = optionIndexes.map((idx) => {
+      const option = options[idx];
       if (!option) throw new Error('客製選項資料不正確。');
-      return { optionId: sid(option.optionId ?? option.id), name: option.name, price: num(option.priceAdjustment ?? option.price) };
+      return { name: option.name, price: num(option.price) };
     });
-    const unitPrice = round2(num(item.basePrice ?? item.price) + selectedOptions.reduce((sum, option) => sum + option.price, 0));
+    const unitPrice = round2(num(item.price) + chosen.reduce((sum, option) => sum + option.price, 0));
     if (unitPrice < 0) throw new Error('餐點金額不正確。');
     return {
       itemId,
@@ -84,7 +87,7 @@ export function computeOrderItems(menuItems, selections) {
       quantity,
       unitPrice,
       lineTotal: round2(unitPrice * quantity),
-      selectedOptions,
+      options: chosen,
     };
   });
   return {
@@ -95,77 +98,69 @@ export function computeOrderItems(menuItems, selections) {
 }
 
 export async function loadSessionWithMenu(session) {
-  const store = await findStoreForClass(session.store_id, session.class_id);
-  const menuItems = await listRows('menu_items', {
-    classId: session.class_id,
-    filters: { store_id: session.store_id, is_active: true },
-    order: 'sort_order',
-  });
-  const options = menuItems.length
-    ? await listRowsIn('item_options', 'menu_item_id', menuItems.map(item => item.id), { classId: session.class_id })
-    : [];
-  const optionsByItem = new Map();
-  options.forEach(option => {
-    const list = optionsByItem.get(String(option.menu_item_id)) || [];
-    list.push(option);
-    optionsByItem.set(String(option.menu_item_id), list);
-  });
+  const store = await findOne('stores', { id: session.store_id }, session.class_id);
+  const menuItems = await listMenuItemsForStore(session.class_id, session.store_id, { includeInactive: false });
   return {
     session,
     storeName: store?.name || '未命名店家',
-    menuItems: menuItems.map(item => ({
+    menuItems: menuItems.map((item) => ({
       itemId: sid(item.id),
       name: item.name,
-      basePrice: num(item.price),
-      options: (optionsByItem.get(String(item.id)) || [])
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .map(option => ({ optionId: sid(option.id), name: option.name, priceAdjustment: num(option.price), maxSelect: num(option.max_select) })),
+      price: num(item.price),
+      options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({
+        index,
+        name: option.name,
+        price: num(option.price),
+      })),
     })),
   };
 }
 
-export function publicSession(session, storeName, menuItems, existingOrder) {
+export function publicSession(session, storeName, menuItems, existingOrder, pureBalanceMode, walletBalance) {
   return {
     sessionId: sid(session.id),
     storeId: sid(session.store_id),
     storeName,
     orderDate: session.order_date,
     cutoffTime: session.cutoff_time,
-    paymentMode: session.payment_mode,
-    isOpen: session.is_open,
+    weekLabel: session.week_label || '',
+    isOpen: Boolean(session.is_open),
+    pureBalanceMode,
+    walletBalance: num(walletBalance),
     menuItems,
     existingOrder: existingOrder ? publicOrder(existingOrder) : null,
   };
 }
 
-export async function loadOpenSessions(user) {
+// 讀取使用者可見的場次（今天與未來；已截止但已有訂單者仍顯示以便查看）
+export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
   const classId = user.class_id;
   const { data: rawSessions, error } = await supabase
     .from('sessions')
     .select('*')
     .eq('class_id', classId)
-    .gte('order_date', todayString(-1))
+    .gte('order_date', todayString())
     .order('order_date', { ascending: true })
     .order('cutoff_time', { ascending: true });
   if (error) throw new Error('讀取場次失敗。');
-  const sessions = (rawSessions || []).filter(s => !s.is_deleted);
+  const sessions = (rawSessions || []).filter((s) => !s.is_deleted);
 
   const orders = sessions.length
-    ? await listRowsIn('orders', 'session_id', sessions.map(session => session.id), { classId })
+    ? await listRowsIn('orders', 'session_id', sessions.map((session) => session.id), { classId })
     : [];
-  const userOrders = orders.filter(order => String(order.user_id) === String(user.id));
-  const orderBySession = new Map(userOrders.map(order => [String(order.session_id), order]));
+  const userOrders = orders.filter((order) => String(order.user_id) === String(user.id));
+  const orderBySession = new Map(userOrders.map((order) => [String(order.session_id), order]));
 
   const result = [];
   for (const session of sessions) {
+    if (!session.is_open) continue; // 草稿場次學生不可見
     const existingOrder = orderBySession.get(String(session.id)) || null;
     const cutoffPassed = new Date(session.cutoff_time).getTime() < Date.now();
     if (cutoffPassed && !existingOrder) continue;
     const { storeName, menuItems } = await loadSessionWithMenu(session);
-    result.push(publicSession(session, storeName, menuItems, existingOrder));
+    result.push(publicSession(session, storeName, menuItems, existingOrder, pureBalanceMode, user.wallet_balance));
   }
-  const orderIds = new Set(userOrders.map(order => order.id));
-  return { sessions: result, orders: userOrders.filter(order => orderIds.has(order.id)).map(publicOrder) };
+  return { sessions: result, orders: userOrders.map(publicOrder) };
 }
 
 // 管理員儀表板用的扁平訂單列

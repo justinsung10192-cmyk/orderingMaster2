@@ -1,331 +1,220 @@
-// 動作：管理員（儀表板、菜單、帳號、設定、邀請碼）
-import { appError, sid, num, round2, sha256Hex, todayString } from '../_lib/util.js';
-import { supabase, findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, countRows, getAppSetting, setAppSetting, listStoresForClass, callRpc } from '../_lib/db.js';
-import { bumpAuthVersion, createInviteCodeValue } from '../_lib/auth.js';
-import { outstandingOf, dashboardOrderRow } from '../_lib/serialize.js';
-import { mailConfigured } from '../_lib/mail.js';
+// 動作：管理員儀表板、帳號管理（含管理者安全防呆）、系統設定、匯總、催繳
+import { appError, sid, num, round2, todayString, weekdayName, monthDay, mondayOf } from '../_lib/util.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass } from '../_lib/db.js';
+import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
+import { dashboardOrderRow, outstandingOf, publicUser } from '../_lib/serialize.js';
+
+// 班級至少保留一位管理者
+async function ensureNotLastAdmin(classId, userId) {
+  const admins = await listRows('users', { classId, filters: { role: 'Admin', is_disabled: false } });
+  if (admins.length <= 1 && admins.some((admin) => String(admin.id) === String(userId))) {
+    throw appError('LAST_ADMIN', '系統必須至少保留一位管理者。若要移除，請先將另一位同學設為管理。');
+  }
+}
+
+async function loadDaySummary(classId, date) {
+  const sessions = (await listRows('sessions', { classId, filters: { order_date: date }, order: 'cutoff_time' }))
+    .filter((session) => !session.is_deleted);
+  const stores = await listStoresForClass(classId);
+  const storeById = new Map(stores.map((store) => [String(store.id), store]));
+
+  let orders = [];
+  if (sessions.length) {
+    const allOrders = await listRowsIn('orders', 'session_id', sessions.map((session) => session.id), { classId });
+    orders = allOrders.filter((order) => !order.is_deleted);
+  }
+  const userIds = [...new Set(orders.map((order) => order.user_id).filter((id) => id != null))];
+  const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId }) : [];
+  const userById = new Map(users.map((user) => [String(user.id), user]));
+
+  const sessionById = new Map(sessions.map((session) => [String(session.id), session]));
+
+  const rows = orders.map((order) => {
+    const session = sessionById.get(String(order.session_id));
+    return dashboardOrderRow(order, session, storeById.get(String(session?.store_id))?.name || '未命名店家', userById.get(String(order.user_id)));
+  });
+
+  const sessionStats = sessions.map((session) => {
+    const sessionOrders = orders.filter((order) => String(order.session_id) === String(session.id));
+    return {
+      sessionId: sid(session.id),
+      storeName: storeById.get(String(session.store_id))?.name || '未命名店家',
+      cutoffTime: session.cutoff_time,
+      orderCount: sessionOrders.length,
+      totalAmount: round2(sessionOrders.reduce((sum, order) => sum + num(order.total_price), 0)),
+      pickedUp: sessionOrders.filter((order) => order.pickup_status === 'PickedUp').length,
+      unpaidAmount: round2(sessionOrders.reduce((sum, order) => sum + outstandingOf(order), 0)),
+    };
+  });
+
+  return {
+    date,
+    weekday: weekdayName(date),
+    monthDay: monthDay(date),
+    sessionStats,
+    orders: rows,
+    totals: {
+      orderCount: rows.length,
+      totalAmount: round2(rows.reduce((sum, row) => sum + row.totalPrice, 0)),
+      unpaidAmount: round2(rows.reduce((sum, row) => sum + row.outstandingAmount, 0)),
+      pickedUp: rows.filter((row) => row.pickupStatus === 'PickedUp').length,
+    },
+  };
+}
 
 export const actions = {
-  async getAdminDashboard(data, ctx) {
-    const classId = ctx.classId;
-    const date = String(data.orderDate || todayString());
-    const rawSessions = await listRows('sessions', { classId, filters: { order_date: date }, order: 'cutoff_time' });
-    const sessions = rawSessions.filter(s => !s.is_deleted);
-    const rawOrders = sessions.length ? await listRowsIn('orders', 'session_id', sessions.map(session => session.id), { classId }) : [];
-    const orders = rawOrders.filter(o => !o.is_deleted);
-    const userIds = [...new Set(orders.map(order => order.user_id).filter(value => value !== null && value !== undefined))];
-    const users = userIds.length ? await listRowsIn('users', 'id', userIds.map(Number), { classId }) : [];
-    const userById = new Map(users.map(user => [String(user.id), user]));
-    const storeById = new Map((await listStoresForClass(ctx.classId)).map(store => [String(store.id), store]));
-    const sessionById = new Map(sessions.map(session => [String(session.id), session]));
-
-    let totalMeals = 0;
-    let totalReceivable = 0;
-    let pickedUp = 0;
-    const unpaidByUser = new Map();
-    orders.forEach(order => {
-      const quantity = (order.items || []).reduce((sum, item) => sum + num(item.quantity), 0);
-      totalMeals += quantity;
-      totalReceivable += num(order.total_price);
-      if (order.pickup_status === 'PickedUp') pickedUp += quantity;
-      const outstanding = outstandingOf(order);
-      if (outstanding > 0) unpaidByUser.set(String(order.user_id), (unpaidByUser.get(String(order.user_id)) || 0) + outstanding);
-    });
-
-    const rows = orders.map(order => {
-      const session = sessionById.get(String(order.session_id));
-      return dashboardOrderRow(order, session, storeById.get(String(session.store_id))?.name || '未命名店家', userById.get(String(order.user_id)));
-    });
-    rows.sort((a, b) => String(a.seatNo).localeCompare(String(b.seatNo), 'zh-Hant-TW', { numeric: true }));
-
-    const summaries = sessions.map(session => {
-      const sessionOrders = orders.filter(order => String(order.session_id) === String(session.id));
-      const itemsMap = new Map();
-      let orderCount = 0;
-      let meals = 0;
-      let unpaid = 0;
-      let picked = 0;
-      let receivable = 0;
-      sessionOrders.forEach(order => {
-        orderCount += 1;
-        const quantity = (order.items || []).reduce((sum, item) => sum + num(item.quantity), 0);
-        meals += quantity;
-        receivable += num(order.total_price);
-        if (order.pickup_status === 'PickedUp') picked += quantity;
-        if (outstandingOf(order) > 0) unpaid += 1;
-        (order.items || []).forEach(item => {
-          const optionsText = (item.selectedOptions || []).map(option => option.name).join('、');
-          const key = `${String(item.itemId)}|${optionsText}`;
-          const entry = itemsMap.get(key) || {
-            itemName: item.itemName,
-            selectedOptions: optionsText,
-            orderCount: 0,
-            totalQuantity: 0,
-          };
-          entry.orderCount += 1;
-          entry.totalQuantity += num(item.quantity);
-          itemsMap.set(key, entry);
-        });
-      });
-      return {
-        sessionId: sid(session.id),
-        storeName: storeById.get(String(session.store_id))?.name || '未命名店家',
-        orderDate: session.order_date,
-        cutoffTime: session.cutoff_time,
-        paymentMode: session.payment_mode,
-        stats: {
-          orderCount,
-          totalMeals: meals,
-          unpaidStudents: unpaid,
-          pickedUp: picked,
-          totalReceivable: round2(receivable),
-        },
-        items: [...itemsMap.values()],
-      };
-    });
-
-    const { data: allSessions } = await supabase.from('sessions').select('order_date').eq('class_id', classId);
-    const availableDates = [...new Set((allSessions || []).map(session => session.order_date))].sort();
-
-    return {
-      stats: { totalMeals, totalReceivable: round2(totalReceivable), unpaidStudents: unpaidByUser.size, pickedUp },
-      orders: rows,
-      sessionSummaries: summaries,
-      availableDates,
-      date,
-    };
+  async adminGetDashboard(data, ctx) {
+    const date = String(data.date || todayString());
+    const summary = await loadDaySummary(ctx.classId, date);
+    // 催繳人數
+    const monday = mondayOf();
+    const overdue = await listRows('orders', { classId: ctx.classId });
+    const overdueUserIds = new Set(
+      overdue
+        .filter((order) => !order.is_deleted && order.order_date < monday && outstandingOf(order) > 0)
+        .map((order) => order.user_id),
+    );
+    return { ...summary, overdueCount: overdueUserIds.size };
   },
 
-  async adminCatalog(_data, ctx) {
-    const stores = await listStoresForClass(ctx.classId);
-    const storeIds = stores.map(store => store.id);
-    const items = storeIds.length ? await listRowsIn('menu_items', 'store_id', storeIds) : [];
-    const itemIds = items.map(item => item.id);
-    const options = itemIds.length ? await listRowsIn('item_options', 'menu_item_id', itemIds) : [];
-    const sessions = await listRows('sessions', { classId: ctx.classId, order: 'order_date' });
-    return {
-      stores: stores.map(store => ({ storeId: sid(store.id), name: store.name, description: store.description || '', contact: store.contact || '', isGlobal: Boolean(store.is_global), isActive: store.is_active })),
-      items: items.map(item => ({ storeId: sid(item.store_id), itemId: sid(item.id), name: item.name, basePrice: num(item.price) })),
-      options: options.map(option => ({
-        itemId: sid(option.menu_item_id),
-        optionId: sid(option.id),
-        name: option.name,
-        priceAdjustment: num(option.price),
-        maxSelect: num(option.max_select),
-      })),
-      sessions: sessions.map(session => ({
-        sessionId: sid(session.id),
-        storeId: sid(session.store_id),
-        orderDate: session.order_date,
-        cutoffTime: session.cutoff_time,
-        paymentMode: session.payment_mode,
-      })),
-    };
+  async adminGetDaySummary(data, ctx) {
+    const date = String(data.date || todayString());
+    return loadDaySummary(ctx.classId, date);
   },
 
-  async adminSaveStore(data, ctx) {
-    const storeId = Number(data.storeId) || null;
-    const name = String(data.name || '').trim();
-    if (!name) throw appError('INVALID_INPUT', '請輸入店家名稱。');
-    const description = String(data.description || '').trim().slice(0, 200);
-    const contact = String(data.contact || '').trim().slice(0, 120);
-    const merchantCode = String(data.merchantCode || '').trim();
-    let merchantId = null;
-    if (merchantCode) {
-      const merchant = await findOne('merchants', { authorization_code_hash: sha256Hex(merchantCode) });
-      if (!merchant) throw appError('INVALID_CODE', '店家合作授權碼不正確。');
-      merchantId = merchant.id;
-    }
-    if (storeId) {
-      const store = await findOne('stores', { id: storeId }, ctx.classId);
-      if (!store) throw appError('NOT_FOUND', '店家不存在。');
-      if (store.is_global) throw appError('FORBIDDEN', '全體共用店家由開發者管理。');
-      const fields = { name, description, contact };
-      if (merchantId) fields.merchant_id = merchantId;
-      await updateRows('stores', { id: store.id }, fields);
-    } else {
-      const fields = { class_id: ctx.classId, name, description, contact };
-      if (merchantId) fields.merchant_id = merchantId;
-      await insertRow('stores', fields);
-    }
-    return { ok: true };
-  },
-
-  async adminDeductBalance(data, ctx) {
-    const userId = Number(data.userId);
-    const amount = Number(data.amount);
-    if (!Number.isInteger(userId) || userId <= 0) throw appError('INVALID_INPUT', '使用者資料不正確。');
-    if (!Number.isFinite(amount) || amount <= 0) throw appError('INVALID_INPUT', '請輸入正確的扣款金額。');
-    const note = String(data.note || '').trim().slice(0, 120) || '管理員手動扣款';
-    const user = await findOne('users', { id: userId }, ctx.classId);
-    if (!user) throw appError('NOT_FOUND', '找不到使用者。');
-    let result;
-    try {
-      result = await callRpc('fn_manual_balance', { p_class_id: ctx.classId, p_user_id: userId, p_amount: -amount, p_note: note });
-    } catch (error) {
-      if (String(error.message || '').includes('fn_manual_balance')) throw appError('DB_ERROR', '資料庫尚未建立餘額調整函式，請在 Supabase SQL Editor 執行 schema.sql 的 v2 擴充區塊。');
-      throw error;
-    }
-    return { ok: true, walletBalance: num(result.wallet_balance), message: `已從錢包扣款 ${amount} 元。` };
-  },
-
-  async adminSaveMenuItem(data, ctx) {
-    const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
-    if (!store) throw appError('NOT_FOUND', '店家不存在。');
-    if (store.is_global) throw appError('FORBIDDEN', '全體共用店家由開發者管理。');
-    const name = String(data.name || '').trim();
-    const basePrice = Number(data.basePrice);
-    if (!name) throw appError('INVALID_INPUT', '請輸入餐點名稱。');
-    if (!Number.isFinite(basePrice) || basePrice < 0) throw appError('INVALID_INPUT', '請輸入正確的價格。');
-    await insertRow('menu_items', { class_id: ctx.classId, store_id: store.id, name, price: basePrice });
-    return { ok: true };
-  },
-
-  async adminSaveItemOption(data, ctx) {
-    const item = await findOne('menu_items', { id: Number(data.itemId) }, ctx.classId);
-    if (!item) throw appError('NOT_FOUND', '餐點不存在。');
-    const name = String(data.name || '').trim();
-    const priceAdjustment = Number(data.priceAdjustment);
-    if (!name) throw appError('INVALID_INPUT', '請輸入選項名稱。');
-    if (!Number.isFinite(priceAdjustment)) throw appError('INVALID_INPUT', '請輸入正確的差額。');
-    await insertRow('item_options', { class_id: ctx.classId, store_id: item.store_id, menu_item_id: item.id, name, price: priceAdjustment });
-    return { ok: true };
-  },
-
-  async adminDeleteStore(data, ctx) {
-    const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
-    if (!store) throw appError('NOT_FOUND', '店家不存在。');
-    if (store.is_global) throw appError('FORBIDDEN', '全體共用店家由開發者管理。');
-    const sessions = await listRows('sessions', { classId: ctx.classId, filters: { store_id: store.id } });
-    const orderCount = await countOrdersOfSessions(sessions, ctx.classId);
-    if (orderCount > 0) throw appError('PROTECTED', '此店家已有訂單紀錄，基於帳務保護無法刪除。');
-    for (const session of sessions) await deleteRows('sessions', { id: session.id });
-    await deleteRows('stores', { id: store.id });
-    return { ok: true };
-  },
-
-  async adminDeleteMenuItem(data, ctx) {
-    const item = await findOne('menu_items', { id: Number(data.itemId) }, ctx.classId);
-    if (!item) throw appError('NOT_FOUND', '餐點不存在。');
-    if (await orderContainsItem(ctx.classId, String(item.id))) {
-      throw appError('PROTECTED', '此餐點已有訂單使用，基於帳務保護無法刪除。');
-    }
-    await deleteRows('menu_items', { id: item.id });
-    return { ok: true };
-  },
-
-  async adminDeleteItemOption(data, ctx) {
-    const option = await findOne('item_options', { id: Number(data.optionId) }, ctx.classId);
-    if (!option) throw appError('NOT_FOUND', '客製選項不存在。');
-    if (await orderContainsOption(ctx.classId, String(option.id))) {
-      throw appError('PROTECTED', '此選項已有訂單使用，基於帳務保護無法刪除。');
-    }
-    await deleteRows('item_options', { id: option.id });
-    return { ok: true };
-  },
-
+  // ---- 帳號管理 ----
   async adminListUsers(_data, ctx) {
     const users = await listRows('users', { classId: ctx.classId, order: 'seat_no' });
-    return users.map(user => ({
-      id: sid(user.id),
-      seatNo: user.seat_no,
-      name: user.student_name,
-      studentNo: user.student_no,
-      walletBalance: num(user.wallet_balance),
-      role: user.role,
-      isDisabled: user.is_disabled,
-    }));
+    const adminCount = users.filter((user) => user.role === 'Admin' && !user.is_disabled).length;
+    return {
+      adminCount,
+      users: users.map((user) => publicUser(user)),
+    };
+  },
+
+  async adminCreateUser(data, ctx) {
+    const studentNo = String(data.studentNo || '').trim();
+    const seatNo = String(data.seatNo || '').trim();
+    const studentName = String(data.studentName || '').trim();
+    const password = String(data.password || '');
+    const role = data.role === 'Admin' ? 'Admin' : 'Student';
+    if (!/^\d{1,30}$/.test(studentNo)) throw appError('INVALID_INPUT', '座號/學號格式不正確。');
+    if (!studentName) throw appError('INVALID_INPUT', '請填寫姓名。');
+    if (!password || password.length < 8) throw appError('WEAK_PASSWORD', '初始密碼至少須為 8 個字元。');
+
+    const duplicate = await findOne('users', { class_id: ctx.classId, student_no: studentNo });
+    if (duplicate) throw appError('DUPLICATE', '此座號/學號已存在。');
+
+    const { salt, hash } = createPassword(password);
+    const user = await insertRow('users', {
+      class_id: ctx.classId,
+      student_no: studentNo,
+      seat_no: seatNo,
+      student_name: studentName,
+      password_hash: hash,
+      salt,
+      role,
+      must_change_password: false,
+    });
+    return { ok: true, user: publicUser(user) };
   },
 
   async adminSetUserDisabled(data, ctx) {
-    const user = await findOne('users', { id: Number(data.userId) }, ctx.classId);
-    if (!user) throw appError('NOT_FOUND', '找不到使用者。');
-    await updateRows('users', { id: user.id }, { is_disabled: Boolean(data.isDisabled) });
-    await bumpAuthVersion(user.id);
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    if (data.disabled && target.role === 'Admin') {
+      await ensureNotLastAdmin(ctx.classId, target.id);
+    }
+    await updateRows('users', { id: target.id }, { is_disabled: Boolean(data.disabled) });
     return { ok: true };
   },
 
   async adminDeleteUser(data, ctx) {
-    const user = await findOne('users', { id: Number(data.userId) }, ctx.classId);
-    if (!user) throw appError('NOT_FOUND', '找不到使用者。');
-    if (user.role === 'Admin') throw appError('PROTECTED', '不可刪除管理員帳號。');
-    if (String(user.id) === String(ctx.user.id)) throw appError('PROTECTED', '不可刪除自己的帳號。');
-    const retainedOrderCount = await countRowsWhere('orders', { user_id: user.id });
-    const retainedTransactionCount = await countRowsWhere('transactions', { user_id: user.id });
-    await deleteRows('users', { id: user.id });
-    return { ok: true, retainedOrderCount, retainedTransactionCount };
-  },
-
-  async adminGetSettings(_data, ctx) {
-    const classRow = await findOne('classes', { class_id: ctx.classId });
-    return { className: classRow ? classRow.name : '本班' };
-  },
-
-  async adminSaveSettings() {
-    return { ok: true };
-  },
-
-  async adminListInviteCodes(_data, ctx) {
-    const codes = await listRows('invite_codes', { classId: ctx.classId, order: 'created_at' });
-    return codes.map(code => ({ inviteCodeId: sid(code.id), label: code.label, isDisabled: code.is_disabled }));
-  },
-
-  async adminCreateInviteCode(data, ctx) {
-    const label = String(data.label || '').trim().slice(0, 80) || '班級邀請碼';
-    const code = createInviteCodeValue();
-    await insertRow('invite_codes', { class_id: ctx.classId, code_hash: sha256Hex(code), label });
-    return { code };
-  },
-
-  async adminDisableInviteCode(data, ctx) {
-    const code = await findOne('invite_codes', { id: Number(data.inviteCodeId) }, ctx.classId);
-    if (!code) throw appError('NOT_FOUND', '找不到邀請碼。');
-    await updateRows('invite_codes', { id: code.id }, { is_disabled: true });
-    return { ok: true };
-  },
-
-  // 班級管理者可直接指定或移除管理者（至少保留一位，不能變更自己）
-  async adminSetRole(data, ctx) {
-    const userId = Number(data.userId);
-    const role = String(data.role || '');
-    if (!['Admin', 'Student'].includes(role)) throw appError('INVALID_INPUT', '角色不正確。');
-    if (userId === ctx.user.id) throw appError('PROTECTED', '不能變更自己的管理者角色。');
-    const user = await findOne('users', { id: userId }, ctx.classId);
-    if (!user) throw appError('NOT_FOUND', '找不到使用者。');
-    if (user.role === role) throw appError('INVALID_INPUT', '該帳號已是此角色。');
-    if (role === 'Student') {
-      const adminCount = await countRows('users', { class_id: ctx.classId, role: 'Admin' });
-      if (adminCount <= 1) throw appError('PROTECTED', '班級至少需要一位管理者，無法移除最後一位。');
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    if (String(target.id) === String(ctx.user.id)) throw appError('FORBIDDEN', '無法刪除自己的帳號。');
+    if (target.role === 'Admin') {
+      await ensureNotLastAdmin(ctx.classId, target.id);
     }
-    await updateRows('users', { id: user.id }, { role });
-    await bumpAuthVersion(user.id);
-    return { ok: true, message: role === 'Admin' ? `${user.student_name} 已成為管理者。` : `${user.student_name} 已改為一般學生。` };
+    await deleteRows('users', { id: target.id });
+    return { ok: true };
+  },
+
+  async adminResetPassword(data, ctx) {
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    const { salt, hash } = defaultPasswordCredentials();
+    await updateRows('users', { id: target.id }, {
+      password_hash: hash,
+      salt,
+      must_change_password: true,
+      updated_at: new Date().toISOString(),
+    });
+    return { ok: true, message: '已重設為預設密碼，該同學下次登入需重新設定。' };
+  },
+
+  async adminSetRole(data, ctx) {
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    const role = data.role === 'Admin' ? 'Admin' : 'Student';
+    if (role === 'Student' && target.role === 'Admin') {
+      await ensureNotLastAdmin(ctx.classId, target.id);
+    }
+    await updateRows('users', { id: target.id }, { role });
+    return { ok: true };
+  },
+
+  // ---- 系統設定 ----
+  async adminGetSettings(_data, ctx) {
+    const classRow = await getClass(ctx.classId);
+    return {
+      className: classRow.name,
+      pureBalanceMode: Boolean(classRow.pure_balance_mode),
+    };
+  },
+
+  async adminSaveSettings(data, ctx) {
+    const className = String(data.className || '').trim();
+    if (className) {
+      await updateRows('classes', { class_id: ctx.classId }, { name: className });
+    }
+    await updateRows('classes', { class_id: ctx.classId }, { pure_balance_mode: Boolean(data.pureBalanceMode) });
+    return { ok: true };
+  },
+
+  // ---- 催繳 ----
+  async adminGetOverdueList(_data, ctx) {
+    const monday = mondayOf();
+    const orders = (await listRows('orders', { classId: ctx.classId })).filter(
+      (order) => !order.is_deleted && order.order_date < monday && outstandingOf(order) > 0,
+    );
+    const userIds = [...new Set(orders.map((order) => order.user_id).filter((id) => id != null))];
+    const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId }) : [];
+    const userById = new Map(users.map((user) => [String(user.id), user]));
+
+    const byUser = new Map();
+    orders.forEach((order) => {
+      const uid = String(order.user_id);
+      const entry = byUser.get(uid) || { userId: uid, orders: [], debt: 0 };
+      entry.orders.push({ orderDate: order.order_date, totalPrice: num(order.total_price), outstanding: outstandingOf(order) });
+      entry.debt = round2(entry.debt + outstandingOf(order));
+      byUser.set(uid, entry);
+    });
+
+    const list = [...byUser.values()]
+      .map((entry) => {
+        const user = userById.get(entry.userId);
+        return {
+          userId: entry.userId,
+          seatNo: user?.seat_no || '',
+          studentNo: user?.student_no || '',
+          studentName: user?.student_name || '已刪除帳號',
+          debt: entry.debt,
+          orderCount: entry.orders.length,
+        };
+      })
+      .sort((a, b) => num(a.seatNo) - num(b.seatNo));
+
+    return { monday, list, totalDebt: round2(list.reduce((sum, row) => sum + row.debt, 0)) };
   },
 };
-
-async function countOrdersOfSessions(sessions, classId) {
-  if (!sessions.length) return 0;
-  const orders = await listRowsIn('orders', 'session_id', sessions.map(session => session.id), { classId });
-  return orders.length;
-}
-
-async function orderContainsItem(classId, itemId) {
-  const orders = await listRows('orders', { classId });
-  return orders.some(order => (order.items || []).some(item => String(item.itemId) === itemId));
-}
-
-async function orderContainsOption(classId, optionId) {
-  const orders = await listRows('orders', { classId });
-  return orders.some(order =>
-    (order.items || []).some(item => (item.selectedOptions || []).some(option => String(option.optionId) === optionId)),
-  );
-}
-
-async function countRowsWhere(table, filters) {
-  let query = supabase.from(table).select('id', { count: 'exact', head: true });
-  Object.entries(filters).forEach(([column, value]) => {
-    query = query.eq(column, value);
-  });
-  const result = await query;
-  return result.count || 0;
-}

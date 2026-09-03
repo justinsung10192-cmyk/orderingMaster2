@@ -1,7 +1,7 @@
 {
-  "name": "班級訂午餐系統",
+  "name": "班級訂餐管理系統",
   "short_name": "訂餐通",
-  "description": "班級訂午餐、儲值錢包與取餐核對",
+  "description": "手機優先的班級訂餐、投票、儲值錢包、掃碼核銷與推播通知系統。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

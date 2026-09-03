@@ -1,100 +1,128 @@
--- ============================================================
--- 班級訂午餐系統 v2 — Supabase / PostgreSQL Schema
--- 在 Supabase 專案的「SQL Editor」整段貼上並執行即可。
--- ============================================================
+-- ============================================================================
+--  班級訂餐管理系統 (Class Meal Ordering PWA) — Supabase / PostgreSQL Schema
+--  在 Supabase 專案的「SQL Editor」整段貼上並執行即可（可重複執行）。
+--  資料存取一律經由伺服器端 service_role（api/），RLS 不影響安全。
+--
+--  ⚠️ 重要：請在「全新的 Supabase 專案」執行本檔。
+--     若你曾在同一個專案執行過舊版 schema（v2 商家/學校/開發者版），
+--     先執行下方註解掉的 drop 段落清空舊表，再執行本檔。
+-- ============================================================================
 
--- 啟用擴充：pg_cron（排程）＋ pg_net（讓排程呼叫 HTTP 端點）
+-- ===== 清除舊版資料表（從舊版 v2 升級時，取消註解並執行一次）=====
+-- drop table if exists public.class_admin_applications cascade;
+-- drop table if exists public.item_options cascade;
+-- drop table if exists public.menu_items cascade;
+-- drop table if exists public.stores cascade;
+-- drop table if exists public.sessions cascade;
+-- drop table if exists public.orders cascade;
+-- drop table if exists public.transactions cascade;
+-- drop table if exists public.verification_records cascade;
+-- drop table if exists public.votes cascade;
+-- drop table if exists public.holidays cascade;
+-- drop table if exists public.invite_codes cascade;
+-- drop table if exists public.class_admin_codes cascade;
+-- drop table if exists public.push_subscriptions cascade;
+-- drop table if exists public.auth_tokens cascade;
+-- drop table if exists public.users cascade;
+-- drop table if exists public.classes cascade;
+-- drop table if exists public.merchants cascade;
+-- drop table if exists public.schools cascade;
+-- drop table if exists public.developers cascade;
+-- drop table if exists public.app_settings cascade;
+
+-- 啟用擴充：pg_cron（排程）＋ pg_net（排程呼叫 HTTP 端點）
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
--- 班級 ------------------------------------------------------------------
+-- 班級（單一班級；純儲值模式開關放這裡）----------------------------------------
 create table if not exists public.classes (
-  id         bigint generated always as identity primary key,
-  class_id   text not null unique,
-  name       text not null,
-  created_at timestamptz not null default now()
+  id                bigint generated always as identity primary key,
+  class_id          text not null unique,
+  name              text not null default '三年甲班',
+  pure_balance_mode boolean not null default false,   -- true = 純儲值模式（餘額不足禁止下單）
+  created_at        timestamptz not null default now()
 );
 
--- 帳號 ------------------------------------------------------------------
+-- 帳號 ----------------------------------------------------------------------
 create table if not exists public.users (
-  id               bigint generated always as identity primary key,
-  class_id         text not null references public.classes(class_id) on delete cascade,
-  student_no       text not null,
-  student_name     text not null,
-  seat_no          text not null default '',
-  email            text not null default '',
-  password_hash    text not null,
-  salt             text not null,
-  role             text not null default 'Student',
-  wallet_balance   numeric(10,2) not null default 0,
-  is_disabled      boolean not null default false,
-  email_verified   boolean not null default false,
-  auth_version     int not null default 0,
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now(),
-  unique (class_id, student_no),
-  unique (class_id, email)
+  id                   bigint generated always as identity primary key,
+  class_id             text not null references public.classes(class_id) on delete cascade,
+  student_no           text not null,
+  seat_no              text not null default '',
+  student_name         text not null,
+  email                text not null default '',
+  password_hash        text not null,
+  salt                 text not null,
+  role                 text not null default 'Student',   -- 'Student' | 'Admin'
+  wallet_balance       numeric(10,2) not null default 0,
+  is_disabled          boolean not null default false,
+  must_change_password boolean not null default false,    -- 首次登入強制改密碼/姓名
+  auth_version         int not null default 0,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now(),
+  unique (class_id, student_no)
 );
-create index if not exists idx_users_student_no on public.users (student_no);
 create index if not exists idx_users_class on public.users (class_id);
+create index if not exists idx_users_role on public.users (class_id, role);
 
--- 店家 / 餐點 / 客製選項 ----------------------------------------------------
+-- 店家 ----------------------------------------------------------------------
 create table if not exists public.stores (
   id         bigint generated always as identity primary key,
   class_id   text not null references public.classes(class_id) on delete cascade,
   name       text not null,
-  description text not null default '',
-  contact    text not null default '',
-  is_global  boolean not null default false,
   is_active  boolean not null default true,
   sort_order int not null default 0,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (class_id, name)
 );
 create index if not exists idx_stores_class on public.stores (class_id);
 
+-- 餐點（客製選項直接內嵌為 jsonb，支援「甜度/冰塊/加料」與加價）------------------
 create table if not exists public.menu_items (
   id         bigint generated always as identity primary key,
   class_id   text not null references public.classes(class_id) on delete cascade,
   store_id   bigint not null references public.stores(id) on delete cascade,
   name       text not null,
   price      numeric(10,2) not null default 0,
+  options    jsonb not null default '[]',   -- [{"name":"加珍珠","price":5}, ...]
   is_active  boolean not null default true,
   sort_order int not null default 0,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  unique (class_id, store_id, name)
 );
 create index if not exists idx_menu_items_store on public.menu_items (store_id);
 
-create table if not exists public.item_options (
-  id           bigint generated always as identity primary key,
-  class_id     text not null references public.classes(class_id) on delete cascade,
-  store_id     bigint not null references public.stores(id) on delete cascade,
-  menu_item_id bigint not null references public.menu_items(id) on delete cascade,
-  name         text not null,
-  price        numeric(10,2) not null default 0,
-  max_select   int not null default 1,
-  sort_order   int not null default 0,
-  created_at   timestamptz not null default now()
-);
-create index if not exists idx_item_options_item on public.item_options (menu_item_id);
-
--- 訂餐場次 ----------------------------------------------------------------
+-- 訂餐場次（一天可多場次；個別場次各自有截止時間）--------------------------------
 create table if not exists public.sessions (
   id                    bigint generated always as identity primary key,
   class_id              text not null references public.classes(class_id) on delete cascade,
   store_id              bigint not null references public.stores(id),
   order_date            date not null,
   cutoff_time           timestamptz not null,
-  payment_mode          text not null default 'Stored-value Only',
-  is_open               boolean not null default true,
+  week_label            text not null default '',          -- 例：'2026-W37'（ISO 週）
+  is_open               boolean not null default false,    -- false=草稿, true=已公布
   is_deleted            boolean not null default false,
   cutoff_reminder_sent  boolean not null default false,
+  start_notice_sent     boolean not null default false,
   created_at            timestamptz not null default now(),
   closed_at             timestamptz
 );
 create index if not exists idx_sessions_class_date on public.sessions (class_id, order_date);
+create index if not exists idx_sessions_week on public.sessions (class_id, week_label);
 create index if not exists idx_sessions_cutoff on public.sessions (cutoff_time);
 
--- 訂單 ------------------------------------------------------------------
+-- 放假日期（標記後當天不訂餐）--------------------------------------------------
+create table if not exists public.holidays (
+  id           bigint generated always as identity primary key,
+  class_id     text not null references public.classes(class_id) on delete cascade,
+  holiday_date date not null,
+  note         text not null default '',
+  created_at   timestamptz not null default now(),
+  unique (class_id, holiday_date)
+);
+create index if not exists idx_holidays_class on public.holidays (class_id);
+
+-- 訂單 ----------------------------------------------------------------------
 create table if not exists public.orders (
   id             bigint generated always as identity primary key,
   class_id       text not null references public.classes(class_id) on delete cascade,
@@ -102,7 +130,7 @@ create table if not exists public.orders (
   user_id        bigint references public.users(id) on delete set null,
   items          jsonb not null default '[]',
   total_price    numeric(10,2) not null default 0,
-  prior_paid     numeric(10,2) not null default 0,
+  prior_paid     numeric(10,2) not null default 0,         -- 已由儲值金支付
   payment_status text not null default 'UnpaidCash',
   is_deleted     boolean not null default false,
   pickup_status  text not null default 'Pending',
@@ -111,54 +139,63 @@ create table if not exists public.orders (
   updated_at     timestamptz not null default now(),
   unique (session_id, user_id)
 );
-create index if not exists idx_orders_class_session on public.orders (class_id, session_id);
-create index if not exists idx_orders_user on public.orders (user_id);
 create index if not exists idx_orders_session on public.orders (session_id);
+create index if not exists idx_orders_user on public.orders (user_id);
 
--- 交易帳目（錢包金流）-------------------------------------------------------
+-- 交易帳目 ------------------------------------------------------------------
 create table if not exists public.transactions (
   id         bigint generated always as identity primary key,
   class_id   text not null references public.classes(class_id) on delete cascade,
   user_id    bigint references public.users(id) on delete set null,
   order_id   bigint references public.orders(id) on delete set null,
-  amount     numeric(10,2) not null,
-  kind       text not null,
+  amount     numeric(10,2) not null,                        -- 正=入帳, 負=扣款
+  kind       text not null,                                 -- TopUp/Wallet/Cash/Refund/Manual
   note       text not null default '',
   created_at timestamptz not null default now()
 );
 create index if not exists idx_transactions_user on public.transactions (user_id, created_at);
 
--- QR 驗證紀錄 ---------------------------------------------------------------
+-- QR / PIN 核銷憑證（每位使用者 x 場次，產生臨時 QR 與 4 位 PIN）------------------
 create table if not exists public.verification_records (
-  id         bigint generated always as identity primary key,
-  class_id   text not null references public.classes(class_id) on delete cascade,
-  session_id bigint references public.sessions(id) on delete set null,
-  user_id    bigint references public.users(id) on delete set null,
-  payload    text not null,
-  pin_hash   text not null default '',
-  status     text not null default 'Pending',
-  expires_at timestamptz not null,
+  id          bigint generated always as identity primary key,
+  class_id    text not null references public.classes(class_id) on delete cascade,
+  session_id  bigint references public.sessions(id) on delete set null,
+  user_id     bigint references public.users(id) on delete set null,
+  payload     text not null,                                -- QR 內容（JSON 字串）
+  pin_hash    text not null default '',                     -- 4 位 PIN 的 sha256
+  status      text not null default 'Pending',              -- Pending/Resolved
+  expires_at  timestamptz not null,
   resolved_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at  timestamptz not null default now()
 );
 create index if not exists idx_verification_user on public.verification_records (user_id, status, expires_at);
 create index if not exists idx_verification_pin on public.verification_records (pin_hash) where status = 'Pending';
 
--- 登入／驗證／重設 Token -----------------------------------------------------
+-- 下週店家許願投票（每人每週 3 票）---------------------------------------------
+create table if not exists public.votes (
+  id         bigint generated always as identity primary key,
+  class_id   text not null references public.classes(class_id) on delete cascade,
+  user_id    bigint not null references public.users(id) on delete cascade,
+  store_id   bigint not null references public.stores(id) on delete cascade,
+  week_label text not null,
+  created_at timestamptz not null default now(),
+  unique (class_id, user_id, store_id, week_label)
+);
+create index if not exists idx_votes_week on public.votes (class_id, week_label);
+
+-- 登入 Session Token（資料庫只存雜湊）-----------------------------------------
 create table if not exists public.auth_tokens (
   id         bigint generated always as identity primary key,
   class_id   text not null default '',
   user_id    bigint references public.users(id) on delete cascade,
-  developer_id bigint references public.developers(id) on delete cascade,
   type       text not null,
   token_hash text not null,
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_auth_tokens_hash on public.auth_tokens (token_hash);
-create index if not exists idx_auth_tokens_user on public.auth_tokens (user_id, type);
 
--- 推播訂閱（Web Push）--------------------------------------------------------
+-- Web Push 訂閱 --------------------------------------------------------------
 create table if not exists public.push_subscriptions (
   id           bigint generated always as identity primary key,
   class_id     text not null default '',
@@ -171,42 +208,7 @@ create table if not exists public.push_subscriptions (
   last_seen_at timestamptz not null default now()
 );
 
--- 邀請碼（一般使用者註冊）------------------------------------------------------
-create table if not exists public.invite_codes (
-  id          bigint generated always as identity primary key,
-  class_id    text not null references public.classes(class_id) on delete cascade,
-  code_hash   text not null,
-  label       text not null default '',
-  is_disabled boolean not null default false,
-  created_at  timestamptz not null default now()
-);
-create index if not exists idx_invite_codes_hash on public.invite_codes (code_hash);
-
--- 班級管理者代碼（開發者核發，一次性）--------------------------------------------
-create table if not exists public.class_admin_codes (
-  id         bigint generated always as identity primary key,
-  code_hash  text not null,
-  label      text not null default '',
-  is_used    boolean not null default false,
-  used_by    text not null default '',
-  created_at timestamptz not null default now()
-);
-create index if not exists idx_class_admin_codes_hash on public.class_admin_codes (code_hash);
-
--- 開發者帳號 ----------------------------------------------------------------
-create table if not exists public.developers (
-  id            bigint generated always as identity primary key,
-  username      text not null unique,
-  email         text not null default '',
-  password_hash text not null,
-  salt          text not null,
-  is_disabled   boolean not null default false,
-  email_verified boolean not null default false,
-  blocked_until timestamptz,
-  created_at    timestamptz not null default now()
-);
-
--- 班級設定（emailDomain、adminAuthCode 等）-------------------------------------
+-- 系統設定（鍵值）--------------------------------------------------------------
 create table if not exists public.app_settings (
   id       bigint generated always as identity primary key,
   class_id text not null default '',
@@ -215,11 +217,85 @@ create table if not exists public.app_settings (
   unique (class_id, key)
 );
 
--- ============================================================
--- 金流原子運算（由 API 以 supabase.rpc 呼叫，避免並發扣款錯誤）
--- ============================================================
+-- ============================================================================
+-- 種子資料：建立 demo 班級 + 37 組預設帳號
+-- 預設密碼一律為「lunch1234」，首次登入強制修改密碼與姓名。
+-- 座號 01 預設為管理員（保證系統至少有一位管理者）。
+-- ============================================================================
 
--- 建立／更新訂單並結算儲值金與現金未繳
+insert into public.classes (class_id, name, pure_balance_mode)
+values ('demo', '三年甲班', false)
+on conflict (class_id) do nothing;
+
+-- 固定 salt 與 PBKDF2-SHA256(100000 次) 雜湊（密碼 = lunch1234）
+insert into public.users
+  (class_id, student_no, seat_no, student_name, email, password_hash, salt, role, wallet_balance, is_disabled, must_change_password)
+values
+('demo','01','01','同學01','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Admin',0,false,true),
+('demo','02','02','同學02','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','03','03','同學03','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','04','04','同學04','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','05','05','同學05','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','06','06','同學06','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','07','07','同學07','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','08','08','同學08','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','09','09','同學09','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','10','10','同學10','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','11','11','同學11','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','12','12','同學12','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','13','13','同學13','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','14','14','同學14','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','15','15','同學15','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','16','16','同學16','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','17','17','同學17','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','18','18','同學18','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','19','19','同學19','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','20','20','同學20','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','21','21','同學21','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','22','22','同學22','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','23','23','同學23','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','24','24','同學24','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','25','25','同學25','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','26','26','同學26','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','27','27','同學27','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','28','28','同學28','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','29','29','同學29','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','30','30','同學30','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','31','31','同學31','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','32','32','同學32','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','33','33','同學33','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','34','34','同學34','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','35','35','同學35','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','36','36','同學36','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','37','37','同學37','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true)
+on conflict (class_id, student_no) do nothing;
+
+-- 示範店家（供投票與排程立即使用）----------------------------------------------
+insert into public.stores (class_id, name, sort_order) values
+('demo','麥味登', 1),
+('demo','八方雲集', 2),
+('demo','五十嵐', 3)
+on conflict (class_id, name) do nothing;
+
+-- 示範菜單（內含客製選項範例）--------------------------------------------------
+insert into public.menu_items (class_id, store_id, name, price, options, sort_order)
+select 'demo', s.id, v.name, v.price, v.options::jsonb, v.sort_order
+from public.stores s,
+     (values
+       ('麥味登', '火腿蛋吐司', 45, '[{"name":"不加美乃滋","price":0},{"name":"加起司","price":10}]', 1),
+       ('麥味登', '奶茶', 30, '[{"name":"無糖","price":0},{"name":"半糖","price":0},{"name":"全糖","price":0},{"name":"去冰","price":0}]', 2),
+       ('八方雲集', '招牌鍋貼(10顆)', 70, '[{"name":"加辣","price":0}]', 1),
+       ('八方雲集', '酸辣湯', 35, '[]', 2),
+       ('五十嵐', '珍珠奶茶', 55, '[{"name":"無糖","price":0},{"name":"微糖","price":0},{"name":"半糖","price":0},{"name":"加布丁","price":15}]', 1)
+     ) as v(store_name, name, price, options, sort_order)
+where s.class_id = 'demo' and s.name = v.store_name
+on conflict (class_id, store_id, name) do nothing;
+
+-- ============================================================================
+-- 金流原子運算（由 API 以 supabase.rpc 呼叫，避免並發扣款錯誤）
+-- ============================================================================
+
+-- 建立／更新訂單並結算（純儲值模式下餘額不足直接拒絕）
 create or replace function public.fn_settle_order(
   p_class_id text,
   p_user_id bigint,
@@ -227,6 +303,7 @@ create or replace function public.fn_settle_order(
   p_total numeric,
   p_wallet_paid numeric,
   p_cash_outstanding numeric,
+  p_pure_mode boolean default false,
   p_prior_paid numeric default 0,
   p_order_id bigint default null,
   p_items jsonb default '[]',
@@ -245,6 +322,16 @@ begin
   for update;
   if v_balance is null then
     raise exception 'USER_NOT_FOUND';
+  end if;
+
+  -- 純儲值模式：錢包必須足以支付全額，禁止現金欠款
+  if p_pure_mode then
+    if p_cash_outstanding > 0 then
+      raise exception 'PURE_MODE_NO_CASH';
+    end if;
+    if v_balance + coalesce(p_prior_paid, 0) < p_wallet_paid then
+      raise exception 'INSUFFICIENT_BALANCE';
+    end if;
   end if;
 
   -- 更新訂單時：先退回原單已付金額，再重新結算
@@ -455,117 +542,6 @@ begin
 end;
 $$;
 
--- ============================================================
--- 排程：截止提醒（選用）——部署完成後在 SQL Editor 執行並替換網址：
---   create extension if not exists pg_cron;
---   create extension if not exists pg_net;
---   select cron.schedule(
---     'cutoff-reminders',
---     '0 * * * *',
---     $$ select net.http_post(
---          url := 'https://你的-app.vercel.app/api/cron?secret=你的CRON_SECRET',
---          headers := jsonb_build_object('Content-Type','application/json'),
---          body := '{}'
---        ) $$
---   );
--- 移除排程：
---   select cron.unschedule('cutoff-reminders');
--- ============================================================
-
-
--- =====================================================================
--- v2 擴充：多學校 / 商家合作 / 管理者代碼申請 / 餘額手動調整（可重複執行）
--- =====================================================================
-
--- 學校
-create table if not exists public.schools (
-  id bigint generated always as identity primary key,
-  name text not null unique,
-  email_domain text not null default '',
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
--- 全區共用虛擬班級：讓全體店家/餐點的 class_id 有外鍵可指
-insert into public.classes (class_id, name)
-values ('global', '全區共用')
-on conflict (class_id) do nothing;
-
-alter table public.classes add column if not exists school_id bigint references public.schools(id) on delete set null;
-
--- 商家
-create table if not exists public.merchants (
-  id bigint generated always as identity primary key,
-  merchant_name text not null,
-  address text not null default '',
-  phone text not null default '',
-  owner_name text not null default '',
-  owner_phone text not null default '',
-  email text not null unique,
-  password_hash text not null,
-  salt text not null,
-  email_verified boolean not null default false,
-  phone_verified boolean not null default false,
-  is_disabled boolean not null default false,
-  blocked_until timestamptz,
-  authorization_code_hash text not null default '',
-  created_at timestamptz not null default now()
-);
-
--- 店家擴充：範圍、學校、商家綁定、營業時間、訂購開關
-alter table public.stores add column if not exists scope text not null default 'class';
-alter table public.stores add column if not exists school_id bigint references public.schools(id) on delete set null;
-alter table public.stores add column if not exists merchant_id bigint references public.merchants(id) on delete set null;
-alter table public.stores add column if not exists business_hours text not null default '';
-alter table public.stores add column if not exists ordering_open boolean not null default true;
-
--- 班級管理者代碼申請
-create table if not exists public.class_admin_applications (
-  id bigint generated always as identity primary key,
-  school_id bigint references public.schools(id) on delete set null,
-  student_name text not null,
-  student_no text not null,
-  class_name text not null,
-  contact_phone text not null default '',
-  email text not null,
-  email_verified boolean not null default false,
-  verification_code_hash text not null default '',
-  verification_expires_at timestamptz,
-  status text not null default 'Pending',
-  reviewed_at timestamptz,
-  created_at timestamptz not null default now()
-);
-create index if not exists idx_applications_status on public.class_admin_applications (status, created_at);
-
--- 商家工作階段與驗證
-alter table public.auth_tokens add column if not exists merchant_id bigint references public.merchants(id) on delete cascade;
-
--- 餘額手動調整（正數=加值，負數=扣款；不可低於0）
-create or replace function public.fn_manual_balance(
-  p_class_id text,
-  p_user_id bigint,
-  p_amount numeric,
-  p_note text
-) returns jsonb
-language plpgsql
-security definer
-as $$
-declare v_balance numeric;
-begin
-  select wallet_balance into v_balance from public.users
-    where id = p_user_id and class_id = p_class_id for update;
-  if v_balance is null then raise exception 'USER_NOT_FOUND'; end if;
-  if v_balance + p_amount < 0 then raise exception 'INSUFFICIENT_BALANCE'; end if;
-  v_balance := v_balance + p_amount;
-  update public.users set wallet_balance = v_balance, updated_at = now() where id = p_user_id;
-  insert into public.transactions (class_id, user_id, order_id, amount, kind, note)
-    values (p_class_id, p_user_id, null, p_amount, 'Manual', coalesce(p_note, '手動調整'));
-  return jsonb_build_object('wallet_balance', v_balance);
-end; $$;
-
--- 店家審核：核准後自動建立共用店家
-alter table public.merchants add column if not exists is_approved boolean not null default false;
-
 -- 刪除場次並退款
 create or replace function public.fn_delete_session_and_refund(
   p_class_id text,
@@ -583,7 +559,7 @@ begin
   if v_session.id is null then
     raise exception 'SESSION_NOT_FOUND';
   end if;
-  
+
   if v_session.is_deleted then
     return jsonb_build_object('ok', true, 'refunded_count', 0);
   end if;
@@ -592,11 +568,11 @@ begin
 
   for v_order in select * from orders where session_id = p_session_id and (is_deleted is null or is_deleted = false) loop
     v_refund := coalesce(v_order.prior_paid, 0);
-    
+
     if v_refund > 0 then
       update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
       where id = v_order.user_id;
-      
+
       insert into transactions (class_id, user_id, order_id, amount, kind, note)
       values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
     end if;
@@ -609,34 +585,41 @@ begin
 end;
 $$;
 
-alter table public.developers add column if not exists wipe_token text;
-alter table public.developers add column if not exists wipe_token_expires_at timestamptz;
-
--- 開發者清空系統所有營業資料
-create or replace function public.fn_wipe_all_data() returns jsonb
+-- 餘額手動調整（正數=加值，負數=扣款；不可低於 0）
+create or replace function public.fn_manual_balance(
+  p_class_id text,
+  p_user_id bigint,
+  p_amount numeric,
+  p_note text
+) returns jsonb
 language plpgsql security definer set search_path = public
 as $$
+declare v_balance numeric;
 begin
-  -- 刪除依賴最深到最淺的資料表內容
-  truncate table public.transactions cascade;
-  truncate table public.orders cascade;
-  truncate table public.sessions cascade;
-  truncate table public.users cascade;
-  truncate table public.classes cascade;
-  truncate table public.class_admin_codes cascade;
-  truncate table public.class_admin_applications cascade;
-  truncate table public.push_subscriptions cascade;
-  
-  -- 刪除商家與菜單，但保留開發者、學校、全區店家的基本架構 (看需求，通常全刪)
-  -- 題目要求：刪除所有資料。我會連店家、餐點一起清空，但保留開發者與學校
-  truncate table public.item_options cascade;
-  truncate table public.menu_items cascade;
-  truncate table public.stores cascade;
-  truncate table public.merchants cascade;
-  
-  -- 重新插入全區共用虛擬班級
-  insert into public.classes (class_id, name) values ('global','全區共用') on conflict (class_id) do nothing;
-  
-  return jsonb_build_object('ok', true);
+  select wallet_balance into v_balance from public.users
+    where id = p_user_id and class_id = p_class_id for update;
+  if v_balance is null then raise exception 'USER_NOT_FOUND'; end if;
+  if v_balance + p_amount < 0 then raise exception 'INSUFFICIENT_BALANCE'; end if;
+  v_balance := v_balance + p_amount;
+  update public.users set wallet_balance = v_balance, updated_at = now() where id = p_user_id;
+  insert into public.transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, null, p_amount, 'Manual', coalesce(p_note, '手動調整'));
+  return jsonb_build_object('wallet_balance', v_balance);
 end;
 $$;
+
+-- ============================================================================
+-- 排程（選用）：部署完成後在 SQL Editor 執行並替換網址與 CRON_SECRET：
+--   create extension if not exists pg_cron;
+--   create extension if not exists pg_net;
+--   select cron.schedule(
+--     'meal-reminders',
+--     '0 * * * *',
+--     $$ select net.http_post(
+--          url := 'https://你的-app.vercel.app/api/cron?secret=你的CRON_SECRET',
+--          headers := jsonb_build_object('Content-Type','application/json'),
+--          body := '{}'
+--        ) $$
+--   );
+-- 移除排程：select cron.unschedule('meal-reminders');
+-- ============================================================================

@@ -1,18 +1,16 @@
 {
-  "name": "class-lunch",
-  "version": "2.0.0",
+  "name": "class-meal-ordering",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "generate:vapid": "node scripts/generate-vapid.js",
-    "smoke": "node scripts/smoke-test.js"
+    "generate:vapid": "node scripts/generate-vapid.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
-    "nodemailer": "^6.9.16",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

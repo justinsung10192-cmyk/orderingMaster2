@@ -11,8 +11,10 @@ export const supabase = createClient(supabaseUrl, serviceKey, {
 
 export function throwDb(error, fallback = '資料庫操作失敗。') {
   if (error?.message?.includes('INSUFFICIENT_BALANCE')) throw appError('INSUFFICIENT_BALANCE', '儲值餘額不足，無法完成此操作。');
+  if (error?.message?.includes('PURE_MODE_NO_CASH')) throw appError('PURE_MODE_NO_CASH', '目前為純儲值模式，餘額不足無法訂餐。');
   if (error?.message?.includes('USER_NOT_FOUND')) throw appError('USER_NOT_FOUND', '找不到使用者。');
   if (error?.message?.includes('ORDER_NOT_FOUND')) throw appError('ORDER_NOT_FOUND', '找不到訂單。');
+  if (error?.message?.includes('SESSION_NOT_FOUND')) throw appError('SESSION_NOT_FOUND', '找不到場次。');
   if (error?.message) throw appError('DB_ERROR', error.message);
   throw appError('DB_ERROR', fallback);
 }
@@ -33,6 +35,7 @@ export async function listRows(table, options = {}) {
 
 export async function listRowsIn(table, column, values, options = {}) {
   const { classId, order = null, orderAscending = true } = options;
+  if (!values || !values.length) return [];
   let query = supabase.from(table).select('*').in(column, values);
   if (classId) query = query.eq('class_id', classId);
   if (order) query = query.order(order, { ascending: orderAscending });
@@ -94,28 +97,6 @@ export async function callRpc(name, params = {}) {
   return data;
 }
 
-// 目前所有讀寫皆經由 API 的 service role 進行（RLS 關閉也不影響安全）。
-// 班級可用的店家 = 本班店家 + 全體共用店家
-
-export async function listStoresForClass(classId) {
-  const classRow = await findOne('classes', { class_id: classId });
-  const schoolId = classRow && classRow.school_id ? String(classRow.school_id) : null;
-  const { data, error } = await supabase
-    .from('stores')
-    .select('*')
-    .or(`class_id.eq.${classId},is_global.eq.true`)
-    .order('sort_order');
-  if (error) throwDb(error);
-  // 全體店家：全區(all)全部分享；學校專屬(school)僅該學校班級可見
-  return (data || []).filter(store => !store.is_global || store.scope !== 'school' || (schoolId && String(store.school_id) === schoolId));
-}
-
-export async function findStoreForClass(storeId, classId) {
-  const store = await findOne('stores', { id: Number(storeId) });
-  if (!store) return null;
-  if (String(store.class_id) === String(classId) || store.is_global) return store;
-  return null;
-}
 export async function getAppSetting(classId, key, defaultValue = '') {
   const row = await findOne('app_settings', { class_id: classId, key });
   return row ? row.value : defaultValue;
@@ -128,4 +109,32 @@ export async function setAppSetting(classId, key, value) {
   } else {
     await insertRow('app_settings', { class_id: classId, key, value: String(value ?? '') });
   }
+}
+
+// 讀取班級資料（含純儲值模式開關）
+export async function getClass(classId) {
+  const row = await findOne('classes', { class_id: classId });
+  if (!row) throw appError('NOT_FOUND', '找不到班級資料。');
+  return row;
+}
+
+export async function isPureBalanceMode(classId) {
+  try {
+    const row = await getClass(classId);
+    return Boolean(row.pure_balance_mode);
+  } catch (_) {
+    return false;
+  }
+}
+
+export async function listStoresForClass(classId, { includeInactive = true } = {}) {
+  const filters = includeInactive ? {} : { is_active: true };
+  const stores = await listRows('stores', { classId, filters, order: 'sort_order' });
+  return stores;
+}
+
+export async function listMenuItemsForStore(classId, storeId, { includeInactive = true } = {}) {
+  const filters = { store_id: storeId };
+  if (!includeInactive) filters.is_active = true;
+  return listRows('menu_items', { classId, filters, order: 'sort_order' });
 }

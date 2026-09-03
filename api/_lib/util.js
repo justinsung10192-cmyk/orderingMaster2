@@ -72,3 +72,65 @@ export function sendJson(res, payload) {
   res.setHeader('Cache-Control', 'no-store');
   res.status(200).send(JSON.stringify(payload));
 }
+
+// ===== 週別工具（週一至週日，ISO 週） =====
+
+// 取得某日所屬週一的本地日期（YYYY-MM-DD）
+export function mondayOf(input = new Date()) {
+  const d = new Date(input);
+  const day = d.getDay(); // 0=Sun, 1=Mon ...
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return todayStringOffset(d);
+}
+
+function todayStringOffset(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// 某日所屬的 ISO 週標籤，例：'2026-W37'
+export function weekLabelOf(dateInput = new Date()) {
+  const monday = new Date(mondayOf(dateInput));
+  const year = monday.getFullYear();
+  const week = Math.ceil((((monday - new Date(year, 0, 1)) / 86400000) + 1) / 7);
+  return `${year}-W${week}`;
+}
+
+// 下週標籤（下週一所在的週）
+export function nextWeekLabel() {
+  const nextMonday = new Date(mondayOf());
+  nextMonday.setDate(nextMonday.getDate() + 7);
+  return weekLabelOf(nextMonday);
+}
+
+// 某週的 7 天日期（週一～週日，YYYY-MM-DD）
+export function weekDates(weekLabel) {
+  const match = /^(\d{4})-W(\d{1,2})$/.exec(String(weekLabel || ''));
+  if (!match) return [];
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  const jan1 = new Date(year, 0, 1);
+  const monday = new Date(jan1);
+  monday.setDate(jan1.getDate() + (1 - jan1.getDay()) + (week - 1) * 7);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return todayStringOffset(d);
+  });
+}
+
+// 台灣星期名稱
+export function weekdayName(dateString) {
+  const d = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '';
+  return ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][d.getDay()];
+}
+
+export function monthDay(dateString) {
+  const d = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
