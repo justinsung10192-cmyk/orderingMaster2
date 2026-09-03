@@ -62,7 +62,8 @@ function toast(message, type = 'info') {
 async function busy(fn) {
   if (state.busy) return;
   state.busy = true;
-  try { await fn(); } finally { state.busy = false; }
+  document.body.classList.add('is-busy');
+  try { await fn(); } finally { state.busy = false; document.body.classList.remove('is-busy'); }
 }
 
 /* ============================ 啟動流程 ============================ */
@@ -418,6 +419,7 @@ function renderOrderSheet() {
   const { total, count } = draftTotal();
   const balance = Number(session.walletBalance || 0);
   const insufficient = session.pureBalanceMode && total > balance;
+  const cutoffPassed = cutoffRemaining(session.cutoffTime).passed;
 
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
@@ -436,31 +438,39 @@ function renderOrderSheet() {
         </div>
 
         <div class="border-t border-ledger/10 bg-white px-5 py-4">
-          ${session.pureBalanceMode ? `
-            <div class="mb-3 flex items-center justify-between text-sm">
-              <span class="text-slate-500">錢包餘額</span>
-              <span class="font-bold tabular-nums ${insufficient ? 'text-red-600' : 'text-stamp'}">${fmtMoney(balance)}</span>
+          ${cutoffPassed ? `
+            <p class="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">已超過截止時間，訂單不可再修改或刪除。</p>
+            <div class="flex items-center justify-between">
+              <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">已截止</span>
             </div>
-            ${insufficient ? '<p class="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">純儲值模式：餘額不足，無法送出訂單。</p>' : ''}
           ` : `
-            <label class="mb-3 flex items-center justify-between text-sm">
-              <span class="text-slate-600">使用儲值金支付</span>
-              <input type="checkbox" id="use-wallet" ${draft.useWallet ? 'checked' : ''} class="h-5 w-5 accent-stamp" />
-            </label>
+            ${session.pureBalanceMode ? `
+              <div class="mb-3 flex items-center justify-between text-sm">
+                <span class="text-slate-500">錢包餘額</span>
+                <span class="font-bold tabular-nums ${insufficient ? 'text-red-600' : 'text-stamp'}">${fmtMoney(balance)}</span>
+              </div>
+              ${insufficient ? '<p class="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">純儲值模式：餘額不足，無法送出訂單。</p>' : ''}
+            ` : `
+              <label class="mb-3 flex items-center justify-between text-sm">
+                <span class="text-slate-600">使用儲值金支付</span>
+                <input type="checkbox" id="use-wallet" ${draft.useWallet ? 'checked' : ''} class="h-5 w-5 accent-stamp" />
+              </label>
+            `}
+            <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+            <div class="flex items-center justify-between">
+              <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
+              <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${session.existingOrder ? '更新訂單' : '送出訂單'}</button>
+            </div>
+            ${session.existingOrder ? '<button id="delete-order" class="mt-2 w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-600">刪除此訂單</button>' : ''}
           `}
-          <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
-          <div class="flex items-center justify-between">
-            <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
-            <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${session.existingOrder ? '更新訂單' : '送出訂單'}</button>
-          </div>
-          ${session.existingOrder ? '<button id="delete-order" class="mt-2 w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-600">刪除此訂單</button>' : ''}
         </div>
       </section>
     </div>`;
 
   $('#use-wallet')?.addEventListener('change', (event) => { state.orderDraft.useWallet = event.target.checked; });
-  $('#order-note').addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
-  $('#submit-order').addEventListener('click', () => { if (!insufficient) submitOrder(); });
+  $('#order-note')?.addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
+  $('#submit-order')?.addEventListener('click', () => { if (!insufficient) submitOrder(); });
   $('#delete-order')?.addEventListener('click', () => openConfirm('刪除訂單', '刪除後已扣儲值金將自動退回。', deleteCurrentOrder));
 }
 
@@ -1094,6 +1104,10 @@ function renderSettingsView(root) {
           <span><span class="block font-bold">修改密碼</span><span class="mt-1 block text-xs text-slate-500">定期更新你的登入密碼。</span></span><span class="text-ledger">›</span>
         </button>
         <div class="mx-5 h-px bg-slate-100"></div>
+        <button data-action="change-name" class="flex w-full items-center justify-between px-5 py-4 text-left">
+          <span><span class="block font-bold">修改姓名</span><span class="mt-1 block text-xs text-slate-500">更新你顯示在系統中的姓名。</span></span><span class="text-ledger">›</span>
+        </button>
+        <div class="mx-5 h-px bg-slate-100"></div>
         <button data-action="logout" class="flex w-full items-center justify-between px-5 py-4 text-left text-red-600">
           <span><span class="block font-bold">登出</span><span class="mt-1 block text-xs text-red-400">清除本機的登入憑證。</span></span><span>›</span>
         </button>
@@ -1425,6 +1439,7 @@ async function handleAction(action, target) {
     case 'toggle-notifications': await toggleNotifications(); break;
     case 'install-app': if (state.deferredInstall) state.deferredInstall.prompt(); break;
     case 'change-password': await promptChangePassword(); break;
+    case 'change-name': promptModal('修改姓名', [{ name: 'studentName', label: '姓名', value: state.user.name }], async (v) => { const r = await api('updateProfile', { studentName: v.studentName }); state.user = r.user; render(); toast('姓名已更新。', 'success'); }); break;
     case 'logout': doLogout(); break;
 
     // 管理員 - 菜單

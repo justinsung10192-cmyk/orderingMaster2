@@ -234,11 +234,11 @@ on conflict (class_id) do nothing;
 insert into public.users
   (class_id, student_no, seat_no, student_name, email, password_hash, salt, role, wallet_balance, is_disabled, must_change_password)
 values
-('demo','01','01','同學01','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Admin',0,false,true),
+('demo','01','01','同學01','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','02','02','同學02','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','03','03','同學03','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','04','04','同學04','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
-('demo','05','05','同學05','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
+('demo','05','05','同學05','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Admin',0,false,true),
 ('demo','06','06','同學06','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','07','07','同學07','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','08','08','同學08','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
@@ -272,6 +272,10 @@ values
 ('demo','36','36','同學36','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true),
 ('demo','37','37','同學37','','ebcc41fc7a43d42d6b6b61b1817574e0ec01880db44ae9a58c926b883d03e537','3f9c2e7a1b5d8f0e6a4c2b8d9e7f1a3c','Student',0,false,true)
 on conflict (class_id, student_no) do nothing;
+
+-- 既有資料庫升級：預設管理者改為 5 號（1 號降為一般學生）
+update public.users set role = 'Student' where class_id = 'demo' and student_no = '01' and role = 'Admin';
+update public.users set role = 'Admin' where class_id = 'demo' and student_no = '05';
 
 -- 示範店家（供投票與排程立即使用）----------------------------------------------
 insert into public.stores (class_id, name, sort_order) values

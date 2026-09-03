@@ -55,6 +55,16 @@ export const actions = {
     return { user: publicUser(fresh) };
   },
 
+  // 修改個人姓名（登入後）
+  async updateProfile(data, ctx) {
+    const studentName = String(data.studentName || '').trim();
+    if (!studentName) throw appError('INVALID_INPUT', '請填寫你的姓名。');
+    if (studentName.length > 24) throw appError('INVALID_INPUT', '姓名過長，請在 24 字以內。');
+    await updateRows('users', { id: ctx.user.id }, { student_name: studentName, updated_at: new Date().toISOString() });
+    const fresh = await findOne('users', { id: ctx.user.id });
+    return { user: publicUser(fresh) };
+  },
+
   // 自願修改密碼（登入後）
   async changePassword(data, ctx) {
     const oldPassword = String(data.oldPassword || '');

@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#173B62" />
     <meta name="description" content="手機優先的班級訂餐管理系統：訂餐、投票、儲值錢包、掃碼核銷與推播通知。" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -45,6 +46,9 @@
       @keyframes sheet { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
       @media (prefers-reduced-motion: reduce) { *, *:before, *:after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
       .pin-box { letter-spacing: .4em; font-variant-numeric: tabular-nums; }
+      body.is-busy { cursor: wait; }
+      body.is-busy button, body.is-busy [data-action] { pointer-events: none !important; }
+      body.is-busy::after { content: ''; position: fixed; inset: 0; background: rgba(248,245,238,.45); z-index: 9990; }
     </style>
   </head>
   <body>
