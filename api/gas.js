@@ -31,6 +31,7 @@ const PUBLIC = new Set(['getPublicConfig', 'login']);
 const ADMIN = new Set([
   'adminSaveSession',
   'adminUpdateSessionCutoff',
+  'adminSetWeekCutoff',
   'adminCloseSession',
   'adminDeleteSession',
   'adminPublishWeek',
@@ -61,6 +62,7 @@ const ADMIN = new Set([
   'adminGetSettings',
   'adminSaveSettings',
   'adminGetOverdueList',
+  'adminResetAllData',
   'aiRecognizeMenu',
 ]);
 

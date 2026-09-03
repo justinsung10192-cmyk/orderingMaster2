@@ -127,8 +127,10 @@ export async function isPureBalanceMode(classId) {
   }
 }
 
-export async function listStoresForClass(classId, { includeInactive = true } = {}) {
-  const filters = includeInactive ? {} : { is_active: true };
+export async function listStoresForClass(classId, { includeInactive = true, includeDeleted = false } = {}) {
+  const filters = { is_deleted: false };
+  if (!includeInactive) filters.is_active = true;
+  if (includeDeleted) delete filters.is_deleted;
   const stores = await listRows('stores', { classId, filters, order: 'sort_order' });
   return stores;
 }

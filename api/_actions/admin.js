@@ -217,4 +217,15 @@ export const actions = {
 
     return { monday, list, totalDebt: round2(list.reduce((sum, row) => sum + row.debt, 0)) };
   },
+
+  // 刪除所有業務資料（訂單/交易/場次/投票/放假/店家/菜單），並將儲值餘額歸零。帳號保留。
+  async adminResetAllData(_data, ctx) {
+    const classId = ctx.classId;
+    // 依外鍵順序清除（先 orders 再 sessions，避免 sessions.store_id 被擋）
+    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'stores']) {
+      await deleteRows(table, { class_id: classId });
+    }
+    await updateRows('users', { class_id: classId }, { wallet_balance: 0, updated_at: new Date().toISOString() });
+    return { ok: true };
+  },
 };

@@ -55,7 +55,12 @@ export const actions = {
   async adminDeleteStore(data, ctx) {
     const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
     if (!store) throw appError('NOT_FOUND', '店家不存在。');
-    await deleteRows('stores', { id: store.id });
+    // 軟刪除：保留外鍵關聯的既有場次/訂單，並釋放店家名稱以便重新新增
+    await updateRows('stores', { id: store.id }, {
+      is_deleted: true,
+      is_active: false,
+      name: `${store.name} (已刪除#${store.id})`,
+    });
     return { ok: true };
   },
 

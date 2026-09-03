@@ -26,7 +26,9 @@ function normalizeItems(parsed) {
 
 async function recognizeWithGemini(imageBase64, mimeType) {
   const apiKey = process.env.GEMINI_API_KEY || '';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+  // gemini-1.5-flash 已停用；預設改用 gemini-2.5-flash，可透過 GEMINI_MODEL 覆寫
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
     generationConfig: { response_mime_type: 'application/json' },
@@ -90,7 +92,7 @@ export const actions = {
         items = await recognizeWithGemini(imageBase64, mimeType);
         provider = 'gemini';
       } catch (error) {
-        if (!hasOpenAI) throw appError('AI_FAILED', `菜單辨識失敗：${error.message}`);
+        if (!hasOpenAI) throw appError('AI_FAILED', `菜單辨識失敗：${error.message}。請檢查 GEMINI_API_KEY 是否有效（或用 GEMINI_MODEL 指定模型），或設定 OPENAI_API_KEY 作為備援。`);
       }
     }
     if (!items && hasOpenAI) {

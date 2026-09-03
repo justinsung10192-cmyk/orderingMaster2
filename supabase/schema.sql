@@ -71,11 +71,14 @@ create table if not exists public.stores (
   class_id   text not null references public.classes(class_id) on delete cascade,
   name       text not null,
   is_active  boolean not null default true,
+  is_deleted boolean not null default false,   -- 軟刪除：避免破壞既有場次/訂單外鍵
   sort_order int not null default 0,
   created_at timestamptz not null default now(),
   unique (class_id, name)
 );
 create index if not exists idx_stores_class on public.stores (class_id);
+-- 既有資料庫升級用：補上 is_deleted 欄位（全新專案可略過）
+alter table public.stores add column if not exists is_deleted boolean not null default false;
 
 -- 餐點（客製選項直接內嵌為 jsonb，支援「甜度/冰塊/加料」與加價）------------------
 create table if not exists public.menu_items (

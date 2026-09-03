@@ -90,17 +90,6 @@ async function bootstrap() {
 
 setInterval(tickCountdowns, 1000);
 
-// 背景即時同步：資料更新時自動刷新，不影響使用者操作（有 Modal 或正在輸入時跳過）
-setInterval(() => {
-  if (!state.token || !state.user || state.busy) return;
-  if (modalRoot && modalRoot.innerHTML.trim()) return;
-  const active = document.activeElement;
-  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
-  refreshBoot()
-    .then(() => { if (!modalRoot.innerHTML.trim()) renderView(); })
-    .catch(() => {});
-}, 30000);
-
 function tickCountdowns() {
   $$('[data-cutoff]').forEach((el) => {
     const iso = el.getAttribute('data-cutoff');
@@ -243,10 +232,13 @@ function render() {
             <span class="grid h-11 w-11 place-items-center rounded-xl bg-ledger font-serif text-xl text-white">⌑</span>
             <div><p class="font-serif text-base font-black leading-5">班級訂餐</p><p id="header-subtitle" class="text-[11px] text-slate-500">${state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳'}</p></div>
           </button>
-          <button data-nav="settings" class="flex items-center gap-2 rounded-full bg-white px-2 py-1.5 shadow-sm ring-1 ring-ledger/5">
-            <span class="grid h-7 w-7 place-items-center rounded-full bg-ledger text-xs font-bold text-white">${escapeHtml((state.user.seatNo || '?').slice(-2))}</span>
-            ${headerWallet}
-          </button>
+          <div class="flex items-center gap-2">
+            <button data-action="manual-refresh" class="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-black text-ledger shadow-sm ring-1 ring-ledger/5" title="重新整理">↻</button>
+            <button data-nav="settings" class="flex items-center gap-2 rounded-full bg-white px-2 py-1.5 shadow-sm ring-1 ring-ledger/5">
+              <span class="grid h-7 w-7 place-items-center rounded-full bg-ledger text-xs font-bold text-white">${escapeHtml((state.user.seatNo || '?').slice(-2))}</span>
+              ${headerWallet}
+            </button>
+          </div>
         </div>
       </header>
       <main id="view" class="mx-auto max-w-3xl px-4 py-5"></main>
@@ -847,7 +839,10 @@ function renderStoreFolder(store) {
           <span class="font-bold text-ledger">${escapeHtml(store.name)}</span>
           <span class="text-xs text-slate-400">${store.items.length} 品項</span>
         </button>
-        <button data-action="edit-store" data-store="${store.storeId}" class="rounded-lg bg-mist px-2.5 py-1.5 text-xs font-bold text-ledger">改名</button>
+        <div class="flex gap-1.5">
+          <button data-action="edit-store" data-store="${store.storeId}" class="rounded-lg bg-mist px-2.5 py-1.5 text-xs font-bold text-ledger">改名</button>
+          <button data-action="del-store" data-store="${store.storeId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-600">刪除</button>
+        </div>
       </div>
       ${!isCollapsed ? `
         <div class="border-t border-dashed border-ledger/10 px-3 py-2">
@@ -886,7 +881,10 @@ async function renderAdminSchedule(content) {
             <button data-schedule-week="prev" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">‹ 上週</button>
             <button data-schedule-week="next" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">下週 ›</button>
           </div>
-          <button data-action="publish-week" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">一鍵公布本週</button>
+          <div class="flex gap-2">
+            <button data-action="week-cutoff" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">統一截止</button>
+            <button data-action="publish-week" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">一鍵公布本週</button>
+          </div>
         </div>
         <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
           <h2 class="font-serif text-xl font-black">${escapeHtml(weekFriendlyLabel(week))}</h2>
@@ -966,6 +964,7 @@ async function renderAdminUsers(content) {
               <div class="flex gap-1.5">
                 ${user.role === 'Admin' ? `<button data-action="demote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-ledger">移除管理</button>` : `<button data-action="promote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">設為管理</button>`}
                 <button data-action="toggle-user" data-user="${user.id}" data-disabled="${user.isDisabled}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.isDisabled ? 'text-stamp' : 'text-slate-500'}">${user.isDisabled ? '啟用' : '停用'}</button>
+                <button data-action="topup" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">儲值</button>
                 <button data-action="reset-pw" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">重設密碼</button>
                 <button data-action="del-user" data-user="${user.id}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">刪除</button>
               </div>
@@ -1012,6 +1011,11 @@ function renderSettingsHtml(content) {
         <p class="font-bold text-red-600">欠繳催繳名單</p>
         <p class="mt-0.5 text-xs text-slate-500">自動辨識超過星期一仍未繳費的同學</p>
       </button>
+      <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
+        <h2 class="font-serif text-lg font-black text-red-600">危險區域</h2>
+        <p class="mt-1 text-xs leading-5 text-red-400">刪除所有訂單、交易、場次、投票、放假、店家與菜單，並將所有帳號儲值餘額歸零。帳號本身會保留，此操作無法復原。</p>
+        <button data-action="reset-all" class="mt-3 w-full rounded-xl bg-red-600 py-3 text-sm font-bold text-white">刪除所有資料</button>
+      </div>
     </div>`;
   content.querySelector('#toggle-pure').addEventListener('click', () => {
     state.admin.settings.pureBalanceMode = !state.admin.settings.pureBalanceMode;
@@ -1347,6 +1351,9 @@ async function onClick(event) {
     state.view = nav;
     if (nav === 'admin') state.adminTab = 'dashboard';
     render();
+    refreshBoot()
+      .then(() => { if (state.view === nav && state.user) render(); })
+      .catch(() => {});
     return;
   }
   if (adminTab) {
@@ -1414,6 +1421,7 @@ async function handleAction(action, target) {
     // 學生
     case 'show-qr': await showMyQr(); break;
     case 'refresh-wallet': await loadWalletDetail(); break;
+    case 'manual-refresh': await manualRefresh(); break;
     case 'toggle-notifications': await toggleNotifications(); break;
     case 'install-app': if (state.deferredInstall) state.deferredInstall.prompt(); break;
     case 'change-password': await promptChangePassword(); break;
@@ -1426,6 +1434,7 @@ async function handleAction(action, target) {
       promptModal('修改店家名稱', [{ name: 'name', label: '店家名稱', value: store?.name }], async (v) => { await api('adminSaveStore', { storeId: store.storeId, name: v.name }); await refreshAdmin(); });
       break;
     }
+    case 'del-store': openConfirm('刪除店家', '刪除後該店家的菜單會隱藏，但既有場次與訂單紀錄仍會保留。確定嗎？', async () => { await api('adminDeleteStore', { storeId: target.getAttribute('data-store') }); toast('店家已刪除。', 'success'); await refreshAdmin(); }); break;
     case 'add-item': openItemEditor(target.getAttribute('data-store')); break;
     case 'edit-item': openItemEditor(null, target.getAttribute('data-item')); break;
     case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); await refreshAdmin(); }); break;
@@ -1450,6 +1459,7 @@ async function handleAction(action, target) {
     case 'edit-session': openSessionEditor(null, target.getAttribute('data-session')); break;
     case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); await refreshAdmin(); }); break;
     case 'publish-week': openConfirm('公布本週菜單', '公布後學生即可開始訂餐，並會推播通知。', async () => { const r = await api('adminPublishWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個場次。`, 'success'); await refreshAdmin(); }); break;
+    case 'week-cutoff': openWeekCutoffModal(); break;
 
     // 管理員 - 核銷
     case 'open-scanner': openScanner(); break;
@@ -1511,6 +1521,7 @@ async function handleAction(action, target) {
     }
     case 'view-overdue': await viewOverdue(); break;
     case 'copy-overdue': await copyOverdue(); break;
+    case 'reset-all': openConfirm('刪除所有資料', '這會清除所有訂單、交易、場次、投票、放假、店家與菜單，並歸零儲值餘額。此操作無法復原！', async () => { await api('adminResetAllData'); toast('已刪除所有資料。', 'success'); await refreshAdmin(); }); break;
 
     // 總覽
     case 'export-csv': await exportCsv(); break;
@@ -1523,6 +1534,27 @@ async function refreshAdmin() {
   state.boot = await api('getBootstrap');
   state.user = state.boot.user;
   render();
+}
+
+async function manualRefresh() {
+  try {
+    await refreshBoot();
+  } catch (_) {}
+  render();
+  toast('已重新整理。', 'success');
+}
+
+function openWeekCutoffModal() {
+  const dates = weekDates(state.admin.scheduleWeek);
+  const defaultVal = dates.length ? `${dates[0]}T09:30` : '';
+  promptModal('設定本週統一截止時間', [
+    { name: 'cutoff', label: '截止時間（套用到本週所有場次）', type: 'datetime-local', value: defaultVal },
+  ], async (v) => {
+    const cutoffTime = new Date(v.cutoff).toISOString();
+    const r = await api('adminSetWeekCutoff', { weekLabel: state.admin.scheduleWeek, cutoffTime });
+    toast(`已更新 ${r.updated} 個場次的截止時間。`, 'success');
+    await refreshAdmin();
+  });
 }
 
 /* ============================ 品項編輯 / AI 辨識 ============================ */
@@ -1601,22 +1633,46 @@ function openAiScan(storeId) {
 async function handleAiFile(event, storeId) {
   const file = event.target.files?.[0];
   if (!file) return;
-  $('#ai-status').textContent = '辨識中，請稍候…';
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const dataUrl = String(reader.result);
-    const imageBase64 = dataUrl.split(',')[1];
-    const mimeType = file.type || 'image/jpeg';
-    try {
-      const result = await api('aiRecognizeMenu', { imageBase64, mimeType });
-      showAiPreview(storeId, result.items);
-    } catch (error) {
-      const statusEl = $('#ai-status');
-      if (statusEl) statusEl.textContent = error.message;
-      else toast(error.message, 'error');
-    }
-  };
-  reader.readAsDataURL(file);
+  const statusEl = $('#ai-status');
+  if (statusEl) statusEl.textContent = '圖片處理中…';
+  try {
+    const { imageBase64, mimeType } = await compressImage(file);
+    if (statusEl) statusEl.textContent = '辨識中，請稍候…';
+    const result = await api('aiRecognizeMenu', { imageBase64, mimeType });
+    showAiPreview(storeId, result.items);
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message;
+    else toast(error.message, 'error');
+  }
+}
+
+// 上傳前先壓縮（縮小到最大 1280px 的 JPEG），避免超過 Vercel 請求上限並加速辨識
+async function compressImage(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+  const maxDim = 1280;
+  let { width, height } = img;
+  if (Math.max(width, height) > maxDim) {
+    const scale = maxDim / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  const compressed = canvas.toDataURL('image/jpeg', 0.85);
+  return { imageBase64: compressed.split(',')[1], mimeType: 'image/jpeg' };
 }
 
 function showAiPreview(storeId, items) {
@@ -1673,7 +1729,7 @@ async function saveAiItems(storeId) {
 
 /* ============================ 排程場次編輯 ============================ */
 function openSessionEditor(date, sessionId) {
-  const storeOptions = (state.admin.schedule?.stores || []).map((store) => ({ value: store.storeId, label: store.name })).join('');
+  const storeOptions = (state.admin.schedule?.stores || []).map((store) => `<option value="${store.storeId}">${escapeHtml(store.name)}</option>`).join('');
   const existing = sessionId ? (state.admin.schedule?.sessions || []).find((s) => s.sessionId === sessionId) : null;
   const cutoffDefault = existing ? existing.cutoffTime.slice(0, 16) : `${date}T09:30`;
 

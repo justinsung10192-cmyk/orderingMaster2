@@ -32,8 +32,29 @@ export const actions = {
       await updateRows('sessions', { id: existing.id }, values);
       return { ok: true, sessionId: sid(existing.id) };
     }
-    const session = await insertRow('sessions', { ...values, class_id: ctx.classId });
-    return { ok: true, sessionId: sid(session.id) };
+    // 若該週已公布（有任一已開放場次），新增場次自動開放，學生可立即訂餐
+    const weekOpen = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel, is_open: true, is_deleted: false } });
+    const autoOpen = weekOpen.length > 0;
+    const session = await insertRow('sessions', {
+      ...values,
+      class_id: ctx.classId,
+      is_open: autoOpen,
+      start_notice_sent: autoOpen,
+    });
+    return { ok: true, sessionId: sid(session.id), autoOpen };
+  },
+
+  // 設定整週統一截止時間（套用到該週所有場次）
+  async adminSetWeekCutoff(data, ctx) {
+    const weekLabel = String(data.weekLabel || '');
+    if (!/^\d{4}-W\d{1,2}$/.test(weekLabel)) throw appError('INVALID_INPUT', '週別格式不正確。');
+    const cutoff = new Date(data.cutoffTime);
+    if (!Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
+    const sessions = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel, is_deleted: false } });
+    for (const session of sessions) {
+      await updateRows('sessions', { id: session.id }, { cutoff_time: cutoff.toISOString(), cutoff_reminder_sent: false });
+    }
+    return { ok: true, updated: sessions.length };
   },
 
   async adminUpdateSessionCutoff(data, ctx) {
