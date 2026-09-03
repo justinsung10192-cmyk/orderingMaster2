@@ -632,8 +632,12 @@ async function loadWalletDetail() {
   try {
     const data = await api('getWalletHistory');
     state.user = { ...state.user, walletBalance: data.user.walletBalance };
-    $('#wallet-balance').textContent = fmtMoney(data.walletBalance);
-    $('#wallet-orders').innerHTML = data.orders.length ? data.orders.map((order) => `
+    const balanceEl = $('#wallet-balance');
+    const ordersEl = $('#wallet-orders');
+    const txsEl = $('#wallet-txs');
+    if (!balanceEl || !ordersEl || !txsEl) return; // 畫面已切換，忽略本次結果
+    balanceEl.textContent = fmtMoney(data.walletBalance);
+    ordersEl.innerHTML = data.orders.length ? data.orders.map((order) => `
       <div class="rounded-xl bg-white p-3.5 shadow-sm ring-1 ring-ledger/5">
         <div class="flex items-center justify-between">
           <p class="font-bold text-ledger">${escapeHtml(order.storeName)}</p>
@@ -646,7 +650,7 @@ async function loadWalletDetail() {
         </div>
       </div>`).join('') : '<p class="rounded-xl bg-white/60 px-4 py-8 text-center text-sm text-slate-400">尚無訂單。</p>';
 
-    $('#wallet-txs').innerHTML = data.transactions.length ? data.transactions.map((tx) => `
+    txsEl.innerHTML = data.transactions.length ? data.transactions.map((tx) => `
       <div class="flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-ledger/5">
         <div><p class="text-sm font-bold text-ledger">${escapeHtml(tx.type)}</p><p class="text-xs text-slate-400">${tx.note || new Date(tx.timestamp).toLocaleString('zh-TW')}</p></div>
         <span class="font-bold tabular-nums ${Number(tx.amount) >= 0 ? 'text-stamp' : 'text-red-600'}">${Number(tx.amount) >= 0 ? '+' : ''}${money(tx.amount)}</span>
@@ -784,7 +788,8 @@ async function renderAdminDashboard(content) {
               </div>`).join('')}
           </div>` : ''}
       </div>`;
-    $('#dashboard-date').addEventListener('change', (event) => {
+    const dateInput = $('#dashboard-date');
+    if (dateInput) dateInput.addEventListener('change', (event) => {
       state.admin.dashboardDate = event.target.value;
       renderAdminTab();
     });
@@ -1008,9 +1013,9 @@ function renderSettingsHtml(content) {
         <p class="mt-0.5 text-xs text-slate-500">自動辨識超過星期一仍未繳費的同學</p>
       </button>
     </div>`;
-  $('#toggle-pure').addEventListener('click', () => {
+  content.querySelector('#toggle-pure').addEventListener('click', () => {
     state.admin.settings.pureBalanceMode = !state.admin.settings.pureBalanceMode;
-    renderSettingsHtml($('#admin-content'));
+    renderSettingsHtml(content);
   });
 }
 
@@ -1096,7 +1101,8 @@ function renderSettingsView(root) {
 function initPushUI() {
   state.push.supported = 'serviceWorker' in navigator && 'PushManager' in window;
   if (!state.push.supported) {
-    $('#notification-status').textContent = '此瀏覽器不支援推播通知。';
+    const statusEl = $('#notification-status');
+    if (statusEl) statusEl.textContent = '此瀏覽器不支援推播通知。';
     return;
   }
   navigator.serviceWorker.ready.then(async (registration) => {
@@ -1185,7 +1191,8 @@ function openScanner() {
       onScanSuccess,
       () => {},
     ).catch(() => {
-      $('#qr-reader').innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用 PIN 輸入。</p>';
+      const readerEl = $('#qr-reader');
+      if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用 PIN 輸入。</p>';
     });
   } else {
     $('#qr-reader').innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入中…</p>';
@@ -1604,7 +1611,9 @@ async function handleAiFile(event, storeId) {
       const result = await api('aiRecognizeMenu', { imageBase64, mimeType });
       showAiPreview(storeId, result.items);
     } catch (error) {
-      $('#ai-status').textContent = error.message;
+      const statusEl = $('#ai-status');
+      if (statusEl) statusEl.textContent = error.message;
+      else toast(error.message, 'error');
     }
   };
   reader.readAsDataURL(file);
