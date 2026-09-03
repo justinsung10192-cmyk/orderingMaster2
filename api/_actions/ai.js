@@ -26,8 +26,8 @@ function normalizeItems(parsed) {
 
 async function recognizeWithGemini(imageBase64, mimeType) {
   const apiKey = process.env.GEMINI_API_KEY || '';
-  // gemini-1.5-flash 已停用；預設改用 gemini-2.5-flash，可透過 GEMINI_MODEL 覆寫
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  // 預設 gemini-3.7-flash（gemini-1.5 / 2.0 / 2.5 均已停用），可透過 GEMINI_MODEL 覆寫
+  const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
