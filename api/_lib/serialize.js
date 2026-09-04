@@ -168,6 +168,7 @@ export function dashboardOrderRow(order, session, storeName, user) {
   return {
     orderId: sid(order.id),
     sessionId: sid(order.session_id),
+    userId: user ? sid(user.id) : '',
     orderDate: session.order_date,
     storeName,
     seatNo: user ? user.seat_no : '',

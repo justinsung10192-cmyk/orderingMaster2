@@ -783,9 +783,12 @@ async function renderAdminDashboard(content) {
                   <p class="text-sm font-bold text-ledger">${escapeHtml(order.seatNo)} ${escapeHtml(order.studentName)}</p>
                   <p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}${order.selectedOptions.length ? '（' + escapeHtml(order.selectedOptions.map((o) => o.name).join('、')) + '）' : ''}</p>
                 </div>
-                <div class="text-right">
-                  <p class="font-bold tabular-nums">$${money(order.totalPrice)}</p>
-                  <span class="text-[10px] font-bold ${paymentColor(order.paymentStatus)}">${paymentLabel(order.paymentStatus)}</span>
+                <div class="flex items-center gap-2">
+                  <div class="text-right">
+                    <p class="font-bold tabular-nums">$${money(order.totalPrice)}</p>
+                    <span class="text-[10px] font-bold ${paymentColor(order.paymentStatus)}">${paymentLabel(order.paymentStatus)}</span>
+                  </div>
+                  ${order.outstandingAmount > 0 ? `<button data-action="settle-order" data-order="${order.orderId}" data-user="${order.userId}" class="rounded-lg bg-stamp px-2.5 py-1.5 text-[11px] font-bold text-white">結帳</button>` : ''}
                 </div>
               </div>`).join('')}
           </div>` : ''}
@@ -929,6 +932,27 @@ async function renderAdminSchedule(content) {
             }).join('')}
           </div>
         </div>
+
+        <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-[11px] font-bold tracking-[.13em] text-stamp">RECURRING</p>
+              <h2 class="font-serif text-xl font-black">每日固定店家</h2>
+            </div>
+            <button data-action="add-recurring" class="rounded-xl bg-ledger px-3 py-2 text-xs font-bold text-white">＋ 固定店家</button>
+          </div>
+          <p class="mt-1 text-xs text-slate-400">設為固定的店家每天都會有場次（放假除外），學生可直接訂餐。</p>
+          <div class="mt-3 space-y-2">
+            ${data.recurring.length ? data.recurring.map((rec) => `
+              <div class="flex items-center justify-between rounded-lg bg-mist/60 px-3 py-2.5">
+                <div>
+                  <p class="text-sm font-bold text-ledger">${escapeHtml(rec.storeName)}</p>
+                  <p class="text-xs text-slate-400">每天截止 ${rec.cutoffTime}</p>
+                </div>
+                <button data-action="del-recurring" data-store="${rec.storeId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">取消固定</button>
+              </div>`).join('') : '<p class="text-xs text-slate-400">尚未設定固定店家。</p>'}
+          </div>
+        </div>
       </div>`;
   } catch (error) {
     content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
@@ -939,12 +963,13 @@ async function renderAdminSchedule(content) {
 function renderAdminVerify(content) {
   content.innerHTML = `
     <div class="space-y-4">
-      <div class="grid grid-cols-2 gap-2">
-        <button data-action="open-scanner" class="rounded-xl bg-ledger py-3.5 text-sm font-bold text-white">📷 掃描 QR</button>
-        <button data-action="pin-input" class="rounded-xl bg-stamp py-3.5 text-sm font-bold text-white">🔢 輸入 PIN</button>
+      <div class="grid grid-cols-3 gap-2">
+        <button data-action="open-scanner" class="rounded-xl bg-ledger py-3.5 text-sm font-bold text-white">📷 掃描</button>
+        <button data-action="pin-input" class="rounded-xl bg-stamp py-3.5 text-sm font-bold text-white">🔢 PIN</button>
+        <button data-action="seat-input" class="rounded-xl bg-apricot py-3.5 text-sm font-bold text-white">🔍 座號</button>
       </div>
       <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
-        <p class="text-xs text-slate-400">掃描學生的 QR Code，或手動輸入 4 位 PIN，即可快速執行「儲值、扣款結帳、取餐標記」。</p>
+        <p class="text-xs text-slate-400">掃描 QR、輸入 4 位 PIN，或直接輸入座號，即可快速執行「儲值、扣款結帳、取餐標記」。</p>
       </div>
       ${state.admin.lastVerify ? verifyResultHtml(state.admin.lastVerify) : ''}
     </div>`;
@@ -1014,6 +1039,12 @@ function renderSettingsHtml(content) {
             </span>
             <span class="grid h-6 w-11 place-items-center rounded-full ${settings.pureBalanceMode ? 'bg-white/30' : 'bg-slate-300'}"><span class="h-4 w-4 rounded-full bg-white shadow transition ${settings.pureBalanceMode ? 'translate-x-2.5' : '-translate-x-2.5'}"></span></span>
           </button>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">欠繳催繳提醒頻率</label>
+            <select id="remind-days" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger">
+              ${[1, 2, 3, 7, 14].map((n) => `<option value="${n}" ${Number(settings.overdueRemindDays) === n ? 'selected' : ''}>每 ${n} 天提醒一次</option>`).join('')}
+            </select>
+          </div>
           <button data-action="save-settings" class="w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲存設定</button>
         </div>
       </div>
@@ -1221,13 +1252,15 @@ async function onScanSuccess(decodedText) {
   if (state.scanner) { try { await state.scanner.stop(); } catch (_) {} state.scanner = null; }
   let payload;
   try { payload = JSON.parse(decodedText); } catch (_) { return toast('QR 內容不是有效的驗證資料。', 'error'); }
+  // 一掃到就立即關閉相機並給回饋，查詢在背景進行，避免等待感
+  closeModal();
+  toast('掃描成功，載入中…', 'success');
   await resolveVerify(payload);
 }
 
 async function resolveVerify(payload) {
   try {
     const result = await api('adminResolveVerification', { payload });
-    closeModal();
     renderVerifyResult(result);
   } catch (error) {
     toast(error.message, 'error');
@@ -1475,11 +1508,24 @@ async function handleAction(action, target) {
     case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); await refreshAdmin(); }); break;
     case 'publish-week': openConfirm('公布本週菜單', '公布後學生即可開始訂餐，並會推播通知。', async () => { const r = await api('adminPublishWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個場次。`, 'success'); await refreshAdmin(); }); break;
     case 'week-cutoff': openWeekCutoffModal(); break;
+    case 'add-recurring': {
+      const storeOpts = (state.admin.schedule?.stores || []).map((s) => ({ value: s.storeId, label: s.name }));
+      promptModal('新增每日固定店家', [
+        { name: 'storeId', label: '店家', type: 'select', options: storeOpts },
+        { name: 'cutoffTime', label: '每天截止時間', type: 'time', value: '10:00' },
+      ], async (v) => { await api('adminSaveRecurring', { storeId: v.storeId, cutoffTime: v.cutoffTime, enabled: true }); toast('已設定固定店家。', 'success'); await refreshAdmin(); });
+      break;
+    }
+    case 'del-recurring': openConfirm('取消固定店家', '取消後將不再自動產生新場次（已產生的場次保留）。', async () => { await api('adminSaveRecurring', { storeId: target.getAttribute('data-store'), enabled: false }); toast('已取消固定。', 'success'); await refreshAdmin(); }); break;
 
     // 管理員 - 核銷
     case 'open-scanner': openScanner(); break;
     case 'pin-input': {
       promptModal('輸入 PIN 碼', [{ name: 'pin', label: '4 位數 PIN', type: 'text' }], async (v) => { const r = await api('adminResolvePin', { pin: v.pin }); closeModal(); renderVerifyResult(r); });
+      break;
+    }
+    case 'seat-input': {
+      promptModal('查詢當天訂單', [{ name: 'seatNo', label: '座號／學號', type: 'text', placeholder: '例如 05' }], async (v) => { const r = await api('adminResolveSeat', { seatNo: v.seatNo }); closeModal(); renderVerifyResult(r); });
       break;
     }
     case 'submit-pin': {
@@ -1515,6 +1561,7 @@ async function handleAction(action, target) {
       break;
     }
     case 'topup': openTopupModal(target.getAttribute('data-user')); break;
+    case 'settle-order': openConfirm('現金結帳', '確認已收取此筆訂單現金並結清？', async () => { await api('adminSettleCash', { userId: target.getAttribute('data-user'), orderIds: [target.getAttribute('data-order')] }); toast('已結帳。', 'success'); await refreshAdmin(); }); break;
 
     // 管理員 - 帳號
     case 'add-user': openAddUserModal(); break;
@@ -1531,7 +1578,8 @@ async function handleAction(action, target) {
     // 管理員 - 設定
     case 'save-settings': {
       const className = $('#class-name')?.value.trim();
-      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode }); toast('設定已儲存。', 'success'); });
+      const overdueRemindDays = Number($('#remind-days')?.value || 1);
+      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode, overdueRemindDays }); toast('設定已儲存。', 'success'); });
       break;
     }
     case 'view-overdue': await viewOverdue(); break;
@@ -1633,16 +1681,26 @@ function openAiScan(storeId) {
           <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR</p><h2 class="font-serif text-xl font-black">智慧菜單辨識</h2></div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
-        <label class="mt-4 flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-6 py-8">
-          <span class="text-3xl">📷</span>
-          <span class="mt-2 text-sm font-bold text-ledger">拍照或上傳菜單照片</span>
-          <span class="mt-1 text-xs text-slate-400">AI 會自動辨識品項與價格</span>
-          <input id="ai-file" type="file" accept="image/*" capture="environment" class="hidden" />
-        </label>
+        <p class="mt-4 text-xs font-bold text-slate-500">選擇照片來源：</p>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-7">
+            <span class="text-3xl">📷</span>
+            <span class="mt-2 text-sm font-bold text-ledger">拍照</span>
+            <span class="mt-1 text-xs text-slate-400">開啟相機</span>
+            <input id="ai-file-camera" type="file" accept="image/*" capture="environment" class="hidden" />
+          </label>
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-7">
+            <span class="text-3xl">🖼️</span>
+            <span class="mt-2 text-sm font-bold text-ledger">上傳圖片</span>
+            <span class="mt-1 text-xs text-slate-400">從相簿選擇</span>
+            <input id="ai-file-upload" type="file" accept="image/*" class="hidden" />
+          </label>
+        </div>
         <p id="ai-status" class="mt-3 text-center text-xs text-slate-400">請選擇照片後開始辨識</p>
       </section>
     </div>`;
-  $('#ai-file').addEventListener('change', (event) => handleAiFile(event, storeId));
+  $('#ai-file-camera').addEventListener('change', (event) => handleAiFile(event, storeId));
+  $('#ai-file-upload').addEventListener('change', (event) => handleAiFile(event, storeId));
 }
 
 async function handleAiFile(event, storeId) {

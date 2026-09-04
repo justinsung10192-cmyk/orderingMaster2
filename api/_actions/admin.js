@@ -170,6 +170,7 @@ export const actions = {
     return {
       className: classRow.name,
       pureBalanceMode: Boolean(classRow.pure_balance_mode),
+      overdueRemindDays: Number(classRow.overdue_remind_days) || 1,
     };
   },
 
@@ -179,6 +180,10 @@ export const actions = {
       await updateRows('classes', { class_id: ctx.classId }, { name: className });
     }
     await updateRows('classes', { class_id: ctx.classId }, { pure_balance_mode: Boolean(data.pureBalanceMode) });
+    const remindDays = Number(data.overdueRemindDays);
+    if (Number.isFinite(remindDays) && remindDays >= 1 && remindDays <= 30) {
+      await updateRows('classes', { class_id: ctx.classId }, { overdue_remind_days: Math.round(remindDays) });
+    }
     return { ok: true };
   },
 
@@ -222,7 +227,7 @@ export const actions = {
   async adminResetAllData(_data, ctx) {
     const classId = ctx.classId;
     // 依外鍵順序清除（先 orders 再 sessions，避免 sessions.store_id 被擋）
-    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'stores']) {
+    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores']) {
       await deleteRows(table, { class_id: classId });
     }
     await updateRows('users', { class_id: classId }, { wallet_balance: 0, updated_at: new Date().toISOString() });

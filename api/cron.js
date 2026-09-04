@@ -4,6 +4,7 @@ import { readRawBody, sendJson, todayString, mondayOf } from './_lib/util.js';
 import { supabase, findOne, listRowsIn, updateRows, getAppSetting, setAppSetting } from './_lib/db.js';
 import { sendPushToUser, sendPushToClass } from './_lib/push.js';
 import { outstandingOf } from './_lib/serialize.js';
+import { materializeRecurring } from './_actions/sessions.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
   try {
     await readRawBody(req);
     const now = Date.now();
-    const result = { startNotices: 0, cutoffReminders: 0, overdueReminders: 0 };
+    const result = { startNotices: 0, cutoffReminders: 0, overdueReminders: 0, materialized: 0 };
 
     // 1) 訂餐開始（補漏：已開放但未通知）
     const { data: startSessions, error: startErr } = await supabase
@@ -68,10 +69,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3) 每日欠繳催繳（每天一次）
+    // 3) 欠繳催繳（依設定間隔發送，預設每天一次）
     const today = todayString();
+    const classRow = await findOne('classes', { class_id: 'demo' });
+    const remindDays = Number(classRow?.overdue_remind_days) || 1;
     const lastOverdue = await getAppSetting('', 'last_overdue_reminder', '');
-    if (lastOverdue !== today) {
+    const daysSince = lastOverdue
+      ? Math.floor((Date.parse(`${today}T00:00:00`) - Date.parse(`${lastOverdue}T00:00:00`)) / 86400000)
+      : 9999;
+    if (daysSince >= remindDays) {
       const monday = mondayOf();
       const { data: overdueOrders, error: overdueErr } = await supabase
         .from('orders')
@@ -96,6 +102,7 @@ export default async function handler(req, res) {
       }
     }
 
+    result.materialized = await materializeRecurring('demo');
     return sendJson(res, { ok: true, data: result });
   } catch (error) {
     return sendJson(res, { ok: false, error: error?.message || '排程執行失敗。' });

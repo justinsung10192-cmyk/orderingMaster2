@@ -63,6 +63,8 @@ const ADMIN = new Set([
   'adminSaveSettings',
   'adminGetOverdueList',
   'adminResetAllData',
+  'adminResolveSeat',
+  'adminSaveRecurring',
   'aiRecognizeMenu',
 ]);
 

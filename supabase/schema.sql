@@ -36,12 +36,15 @@ create extension if not exists pg_net;
 
 -- 班級（單一班級；純儲值模式開關放這裡）----------------------------------------
 create table if not exists public.classes (
-  id                bigint generated always as identity primary key,
-  class_id          text not null unique,
-  name              text not null default '三年甲班',
-  pure_balance_mode boolean not null default false,   -- true = 純儲值模式（餘額不足禁止下單）
-  created_at        timestamptz not null default now()
+  id                   bigint generated always as identity primary key,
+  class_id             text not null unique,
+  name                 text not null default '三年甲班',
+  pure_balance_mode    boolean not null default false,   -- true = 純儲值模式（餘額不足禁止下單）
+  overdue_remind_days  int not null default 1,           -- 欠繳催繳提醒間隔（天）
+  created_at           timestamptz not null default now()
 );
+-- 既有資料庫升級用：補上 overdue_remind_days 欄位（全新專案可略過）
+alter table public.classes add column if not exists overdue_remind_days int not null default 1;
 
 -- 帳號 ----------------------------------------------------------------------
 create table if not exists public.users (
@@ -94,6 +97,18 @@ create table if not exists public.menu_items (
   unique (class_id, store_id, name)
 );
 create index if not exists idx_menu_items_store on public.menu_items (store_id);
+
+-- 每日固定店家（固定菜單：每天都有場次，放假除外）--------------------------------
+create table if not exists public.recurring_menu (
+  id          bigint generated always as identity primary key,
+  class_id    text not null references public.classes(class_id) on delete cascade,
+  store_id    bigint not null references public.stores(id) on delete cascade,
+  cutoff_time text not null default '10:00',             -- 每天截止時間（HH:MM）
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now(),
+  unique (class_id, store_id)
+);
+create index if not exists idx_recurring_class on public.recurring_menu (class_id);
 
 -- 訂餐場次（一天可多場次；個別場次各自有截止時間）--------------------------------
 create table if not exists public.sessions (

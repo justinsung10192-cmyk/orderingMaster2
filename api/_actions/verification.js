@@ -7,10 +7,12 @@ import { sendPushToUser } from '../_lib/push.js';
 const VERIFY_MINUTES = 5;
 
 async function resolveContext(classId, userId) {
-  const student = await findOne('users', { id: Number(userId) }, classId);
+  const [student, allOrdersRaw] = await Promise.all([
+    findOne('users', { id: Number(userId) }, classId),
+    listRows('orders', { classId, filters: { user_id: Number(userId) } }),
+  ]);
   if (!student) throw appError('NOT_FOUND', '找不到學生帳號。');
-
-  const allOrders = (await listRows('orders', { classId, filters: { user_id: student.id } })).filter((order) => !order.is_deleted);
+  const allOrders = allOrdersRaw.filter((order) => !order.is_deleted);
   const sessionIds = [...new Set(allOrders.map((order) => order.session_id))];
   const sessions = sessionIds.length ? await listRowsIn('sessions', 'id', sessionIds, { classId }) : [];
   const sessionById = new Map(sessions.map((session) => [String(session.id), session]));
@@ -103,6 +105,26 @@ export const actions = {
 
     await updateRows('verification_records', { id: record.id }, { status: 'Resolved', resolved_at: new Date().toISOString() });
     return resolveContext(ctx.classId, payload.uid);
+  },
+
+  // 直接輸入座號／學號查詢當天訂單（不需掃碼或 PIN）
+  async adminResolveSeat(data, ctx) {
+    const raw = String(data.seatNo || '').trim();
+    if (!raw) throw appError('INVALID_INPUT', '請輸入座號或學號。');
+    const candidates = [raw];
+    if (/^\d+$/.test(raw)) {
+      const padded = raw.padStart(2, '0');
+      if (padded !== raw) candidates.push(padded);
+    }
+    let student = null;
+    for (const no of candidates) {
+      student = await findOne('users', { seat_no: no }, ctx.classId);
+      if (student) break;
+      student = await findOne('users', { student_no: no }, ctx.classId);
+      if (student) break;
+    }
+    if (!student) throw appError('NOT_FOUND', '找不到此座號／學號的同學。');
+    return resolveContext(ctx.classId, student.id);
   },
 
   async adminConfirmPickup(data, ctx) {
