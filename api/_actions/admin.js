@@ -59,6 +59,19 @@ async function loadDaySummary(classId, date) {
   });
   const itemTotals = [...itemMap.values()].sort((a, b) => b.quantity - a.quantity);
 
+  // 當天欠費名單（依座號排序，只列出仍有現金欠款的同學）
+  const debtorMap = new Map();
+  orders.forEach((order) => {
+    const out = outstandingOf(order);
+    if (out <= 0) return;
+    const uid = String(order.user_id);
+    const user = userById.get(uid);
+    const entry = debtorMap.get(uid) || { userId: uid, seatNo: user?.seat_no || '', studentNo: user?.student_no || '', studentName: user?.student_name || '已刪除帳號', debt: 0 };
+    entry.debt = round2(entry.debt + out);
+    debtorMap.set(uid, entry);
+  });
+  const debtors = [...debtorMap.values()].sort((a, b) => num(a.seatNo) - num(b.seatNo));
+
   return {
     date,
     weekday: weekdayName(date),
@@ -66,6 +79,7 @@ async function loadDaySummary(classId, date) {
     sessionStats,
     orders: rows,
     itemTotals,
+    debtors,
     totals: {
       orderCount: rows.length,
       totalAmount: round2(rows.reduce((sum, row) => sum + row.totalPrice, 0)),

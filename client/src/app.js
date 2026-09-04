@@ -611,6 +611,10 @@ function renderWalletView(root) {
           <div><p class="text-sm text-emerald-100">目前儲值餘額</p><p id="wallet-balance" class="mt-1 font-serif text-4xl font-black tabular-nums">${fmtMoney(user.walletBalance)}</p></div>
           <span class="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">我的錢包</span>
         </div>
+        <div class="mt-3 flex items-center justify-between rounded-xl bg-white/15 px-3 py-2.5">
+          <span class="text-sm text-emerald-50">現金欠費（待繳）</span>
+          <span id="wallet-debt" class="font-bold tabular-nums text-red-100">--</span>
+        </div>
         <div class="mt-4 grid grid-cols-2 gap-2">
           <button data-action="show-qr-pay" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">💰 繳費 QR</button>
           <button data-action="show-qr-pickup" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🍱 取餐 QR</button>
@@ -640,8 +644,10 @@ async function loadWalletDetail() {
     const balanceEl = $('#wallet-balance');
     const ordersEl = $('#wallet-orders');
     const txsEl = $('#wallet-txs');
+    const debtEl = $('#wallet-debt');
     if (!balanceEl || !ordersEl || !txsEl) return; // 畫面已切換，忽略本次結果
     balanceEl.textContent = fmtMoney(data.walletBalance);
+    if (debtEl) debtEl.textContent = data.cashUnpaid > 0 ? fmtMoney(data.cashUnpaid) : '無';
     ordersEl.innerHTML = data.orders.length ? data.orders.map((order) => `
       <div class="rounded-xl bg-white p-3.5 shadow-sm ring-1 ring-ledger/5">
         <div class="flex items-center justify-between">
@@ -653,6 +659,7 @@ async function loadWalletDetail() {
           <span class="rounded-full px-2 py-0.5 text-[10px] font-bold ${paymentColor(order.paymentStatus)}">${paymentLabel(order.paymentStatus)}</span>
           <span class="rounded-full px-2 py-0.5 text-[10px] font-bold ${order.pickupStatus === 'PickedUp' ? 'bg-stamp/10 text-stamp' : 'bg-slate-100 text-slate-500'}">${order.pickupStatus === 'PickedUp' ? '已取餐' : '未取餐'}</span>
         </div>
+        ${order.outstandingAmount > 0 ? `<p class="mt-1.5 text-xs font-bold text-red-600">尚欠 ${fmtMoney(order.outstandingAmount)}</p>` : ''}
       </div>`).join('') : '<p class="rounded-xl bg-white/60 px-4 py-8 text-center text-sm text-slate-400">尚無訂單。</p>';
 
     txsEl.innerHTML = data.transactions.length ? data.transactions.map((tx) => `
@@ -763,6 +770,15 @@ async function renderAdminDashboard(content) {
           ${statCard('未繳', `$${money(totals.unpaidAmount)}`)}
           ${statCard('已取餐', totals.pickedUp)}
         </div>
+        ${data.debtors.length ? `
+          <div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+            <p class="border-b border-ledger/5 px-4 py-3 text-sm font-bold text-red-600">今日欠費名單</p>
+            ${data.debtors.map((d) => `
+              <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-2.5 last:border-b-0">
+                <p class="text-sm font-bold text-ledger">${escapeHtml(d.seatNo)} ${escapeHtml(d.studentName)}</p>
+                <span class="font-bold tabular-nums text-red-600">欠 ${fmtMoney(d.debt)}</span>
+              </div>`).join('')}
+          </div>` : ''}
         ${data.itemTotals.length ? `
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
             <p class="text-[11px] font-bold tracking-[.13em] text-stamp">ITEM SUMMARY</p>

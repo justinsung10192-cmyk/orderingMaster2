@@ -54,6 +54,7 @@ export const actions = {
           storeName: store?.name || '未指定店家',
           itemName: itemNameOf(order),
           totalPrice: num(order.total_price),
+          outstandingAmount: outstandingOf(order),
           paymentStatus: order.payment_status,
           pickupStatus: order.pickup_status,
         };
