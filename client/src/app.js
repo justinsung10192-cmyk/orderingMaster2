@@ -772,11 +772,11 @@ async function renderAdminDashboard(content) {
         </div>
         ${data.debtors.length ? `
           <div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
-            <p class="border-b border-ledger/5 px-4 py-3 text-sm font-bold text-red-600">今日欠費名單</p>
+            <p class="border-b border-ledger/5 px-4 py-3 text-sm font-bold text-red-600">未繳總整理（按座號）</p>
             ${data.debtors.map((d) => `
               <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-2.5 last:border-b-0">
-                <p class="text-sm font-bold text-ledger">${escapeHtml(d.seatNo)} ${escapeHtml(d.studentName)}</p>
-                <span class="font-bold tabular-nums text-red-600">欠 ${fmtMoney(d.debt)}</span>
+                <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(d.seatNo)} ${escapeHtml(d.studentName)}</p><p class="text-[11px] text-slate-400">${d.orderCount} 筆待繳</p></div>
+                <span class="ml-2 shrink-0 font-bold tabular-nums text-red-600">欠 ${fmtMoney(d.debt)}</span>
               </div>`).join('')}
           </div>` : ''}
         ${data.itemTotals.length ? `
@@ -1317,40 +1317,70 @@ function renderVerifyResult(result) {
 }
 
 function verifyResultHtml(result) {
-  const intentLabel = result.intent === 'pay' ? '繳費' : result.intent === 'pickup' ? '取餐' : '查詢';
-  const intentColor = result.intent === 'pay' ? 'bg-apricot/15 text-apricot' : result.intent === 'pickup' ? 'bg-stamp/15 text-stamp' : 'bg-mist text-slate-500';
-  return `
+  const student = result.student;
+  const head = (subtitle) => `
     <div class="rounded-2xl bg-white p-5 shadow-paper ring-1 ring-ledger/5">
       <div class="flex items-center gap-3">
-        <span class="grid h-12 w-12 place-items-center rounded-xl bg-stamp text-lg font-black text-white">${escapeHtml(result.student.seatNo || '?')}</span>
+        <span class="grid h-12 w-12 place-items-center rounded-xl bg-stamp text-lg font-black text-white">${escapeHtml(student.seatNo || '?')}</span>
         <div>
-          <p class="font-serif text-lg font-black">${escapeHtml(result.student.name)}</p>
-          <p class="text-xs text-slate-500">餘額 ${fmtMoney(result.walletBalance)} · 未繳 ${fmtMoney(result.totalDebt)}</p>
+          <p class="font-serif text-lg font-black">${escapeHtml(student.name)}</p>
+          <p class="text-xs text-slate-500">${subtitle}</p>
         </div>
-        <span class="ml-auto shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${intentColor}">${intentLabel}</span>
-      </div>
+      </div>`;
 
-      ${result.todayOrders.length ? `
-        <p class="mb-2 mt-4 text-sm font-bold">今日訂單（取餐標記）</p>
-        ${result.todayOrders.map((order) => `
-          <div class="mb-2 flex items-center justify-between rounded-xl bg-mist/60 px-3 py-2.5">
-            <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p></div>
-            <button data-action="confirm-pickup" data-order="${order.orderId}" data-user="${result.student.id}" class="rounded-lg ${order.pickupStatus === 'PickedUp' ? 'bg-slate-200 text-slate-400' : 'bg-stamp text-white'} px-3 py-2 text-xs font-bold">${order.pickupStatus === 'PickedUp' ? '已取餐' : '標記取餐'}</button>
-          </div>`).join('')}` : ''}
-
-      ${result.unpaidOrders.length ? `
-        <p class="mb-2 mt-4 text-sm font-bold">待結帳訂單</p>
-        ${result.unpaidOrders.map((order) => `
-          <div class="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-            <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
-            <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
-          </div>`).join('')}
-        <button data-action="settle-all" data-user="${result.student.id}" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">現金結清全部（$${money(result.totalDebt)}）</button>` : ''}
-
-      <div class="mt-4 flex gap-2">
-        <button data-action="topup" data-user="${result.student.id}" class="flex-1 rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲值</button>
-      </div>
+  // 取餐碼：只顯示今天點的餐 + 確定領取
+  if (result.intent === 'pickup') {
+    const rows = result.todayOrders.length ? result.todayOrders.map((order) => `
+        <div class="mt-2 flex items-center justify-between rounded-xl bg-mist/60 px-3 py-2.5">
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p></div>
+          <button data-action="confirm-pickup" data-order="${order.orderId}" data-user="${student.id}" class="ml-2 shrink-0 rounded-lg ${order.pickupStatus === 'PickedUp' ? 'bg-slate-200 text-slate-400' : 'bg-stamp text-white'} px-3 py-2 text-xs font-bold">${order.pickupStatus === 'PickedUp' ? '已取餐' : '確定領取'}</button>
+        </div>`).join('') : '<p class="mt-3 rounded-xl bg-mist/60 px-3 py-8 text-center text-sm text-slate-400">今天沒有訂單。</p>';
+    return `${head('取餐 · 餘額 ' + fmtMoney(result.walletBalance))}
+      <p class="mb-1 mt-4 text-sm font-bold">今日訂單（領取餐點）</p>
+      ${rows}
     </div>`;
+  }
+
+  // 繳費碼：只顯示欠費多少 + 確認繳款
+  if (result.intent === 'pay') {
+    const rows = result.unpaidOrders.length ? result.unpaidOrders.map((order) => `
+        <div class="mt-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
+          <span class="ml-2 shrink-0 font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+        </div>`).join('') : '';
+    return `${head('繳費 · 餘額 ' + fmtMoney(result.walletBalance))}
+      <div class="mt-4 flex items-center justify-between rounded-xl bg-red-50 px-4 py-3">
+        <div><p class="text-xs text-red-400">欠費總額</p><p class="font-serif text-2xl font-black text-red-600">${fmtMoney(result.totalDebt)}</p></div>
+        <span class="text-xs text-red-400">${result.unpaidOrders.length} 筆待繳</span>
+      </div>
+      ${rows}
+      ${result.totalDebt > 0 ? `<button data-action="settle-all" data-user="${student.id}" class="mt-4 w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認繳款（$${money(result.totalDebt)}）</button>` : '<p class="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-center text-sm font-bold text-emerald-600">已全數繳清，無欠費。</p>'}
+    </div>`;
+  }
+
+  // 座號查詢：完整顯示（取餐 + 欠費 + 儲值）
+  return `${head('查詢 · 餘額 ' + fmtMoney(result.walletBalance) + ' · 未繳 ' + fmtMoney(result.totalDebt))}
+    ${result.todayOrders.length ? `
+      <p class="mb-2 mt-4 text-sm font-bold">今日訂單（取餐標記）</p>
+      ${result.todayOrders.map((order) => `
+        <div class="mb-2 flex items-center justify-between rounded-xl bg-mist/60 px-3 py-2.5">
+          <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p></div>
+          <button data-action="confirm-pickup" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg ${order.pickupStatus === 'PickedUp' ? 'bg-slate-200 text-slate-400' : 'bg-stamp text-white'} px-3 py-2 text-xs font-bold">${order.pickupStatus === 'PickedUp' ? '已取餐' : '標記取餐'}</button>
+        </div>`).join('')}` : ''}
+
+    ${result.unpaidOrders.length ? `
+      <p class="mb-2 mt-4 text-sm font-bold">待結帳訂單</p>
+      ${result.unpaidOrders.map((order) => `
+        <div class="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+          <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
+          <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+        </div>`).join('')}
+      <button data-action="settle-all" data-user="${student.id}" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">現金結清全部（$${money(result.totalDebt)}）</button>` : ''}
+
+    <div class="mt-4 flex gap-2">
+      <button data-action="topup" data-user="${student.id}" class="flex-1 rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲值</button>
+    </div>
+  </div>`;
 }
 
 /* ============================ 各種 Modal 與動作 ============================ */
@@ -1533,8 +1563,7 @@ async function handleAction(action, target) {
     case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); await refreshAdmin(); }); break;
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': openMonthlyScan(); break;
-    case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
-    case 'import-monthly': await busy(async () => { const r = await api('adminImportMonthlyMenu', { entries: state.monthlyEntries, defaultCutoffTime: state.monthlyCutoff || '09:30' }); closeModal(); toast(`已匯入 ${r.stores} 店家、${r.items} 品項、${r.sessions} 場次。`, 'success'); await refreshAdmin(); }); break;
+    case 'save-vendor-items': await saveVendorItems(); break;
     case 'save-item': await saveItem(target.getAttribute('data-item')); break;
     case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
     case 'del-ai-item': {
@@ -1757,14 +1786,14 @@ function openMonthlyScan() {
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
       <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
         <div class="flex items-center justify-between">
-          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · MONTHLY</p><h2 class="font-serif text-xl font-black">上傳每月菜單</h2></div>
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · 每月菜單</p><h2 class="font-serif text-xl font-black">上傳廠商菜單</h2></div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
         <div class="mt-4">
-          <label class="mb-1 block text-xs font-bold text-slate-500">每天截止時間（套用到整月）</label>
-          <input id="monthly-cutoff" type="time" value="09:30" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          <label class="mb-1 block text-xs font-bold text-slate-500">廠商名稱（店家）</label>
+          <input id="monthly-store" placeholder="例如：a 店家、八方雲集…" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
         </div>
-        <p class="text-xs font-bold text-slate-500">選擇照片來源：</p>
+        <p class="text-xs font-bold text-slate-500">選擇照片來源（可陸續上傳多家）：</p>
         <div class="mt-2 grid grid-cols-2 gap-3">
           <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-6">
             <span class="text-3xl">📷</span><span class="mt-2 text-sm font-bold text-ledger">拍照</span>
@@ -1775,62 +1804,65 @@ function openMonthlyScan() {
             <input id="monthly-upload" type="file" accept="image/*" class="hidden" />
           </label>
         </div>
-        <p id="monthly-status" class="mt-3 text-center text-xs text-slate-400">請上傳學校的每月菜單照片（含每天日期與店家）。</p>
+        <p id="monthly-status" class="mt-3 text-center text-xs text-slate-400">每家廠商分別上傳一張菜單照片，辨識結果依「廠商-品項-主菜」分組。</p>
       </section>
     </div>`;
-  const cutoffInput = $('#monthly-cutoff');
-  $('#monthly-camera').addEventListener('change', (event) => handleMonthlyFile(event, cutoffInput));
-  $('#monthly-upload').addEventListener('change', (event) => handleMonthlyFile(event, cutoffInput));
+  const storeInput = $('#monthly-store');
+  $('#monthly-camera').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
+  $('#monthly-upload').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
 }
 
-async function handleMonthlyFile(event, cutoffInput) {
+async function handleMonthlyFile(event, storeInput) {
   const file = event.target.files?.[0];
   if (!file) return;
+  const storeName = (storeInput?.value || '').trim();
+  if (!storeName) return toast('請先輸入廠商名稱。', 'error');
   const statusEl = $('#monthly-status');
   if (statusEl) statusEl.textContent = '圖片處理中…';
   try {
     const { imageBase64, mimeType } = await compressImage(file);
-    if (statusEl) statusEl.textContent = '辨識整月菜單中，請稍候…';
-    const result = await api('aiRecognizeMonthlyMenu', { imageBase64, mimeType });
-    state.monthlyCutoff = cutoffInput?.value || '09:30';
-    showMonthlyPreview(result.entries);
+    if (statusEl) statusEl.textContent = `辨識「${storeName}」菜單中，請稍候…`;
+    const result = await api('aiRecognizeMenu', { imageBase64, mimeType });
+    showVendorPreview(storeName, result.items);
   } catch (error) {
     if (statusEl) statusEl.textContent = error.message;
     else toast(error.message, 'error');
   }
 }
 
-function showMonthlyPreview(entries) {
-  state.monthlyEntries = entries;
+function showVendorPreview(storeName, items) {
+  if (!items.length) { toast('沒有辨識到任何品項。', 'error'); closeModal(); return; }
+  state.monthlyStore = storeName;
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
-      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
-        <div class="flex items-center justify-between">
-          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">辨識結果（${entries.length} 天）</h2></div>
+      <section class="sheet-enter flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
+        <div class="flex items-center justify-between border-b border-ledger/10 bg-white px-5 py-4">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">${escapeHtml(storeName)} · 辨識結果</h2></div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
-        <p class="mt-2 text-xs text-slate-400">確認無誤後匯入，系統會自動建立店家、品項與每天場次（草稿）。</p>
-        <div id="monthly-list" class="mt-3 max-h-[52dvh] space-y-2 overflow-y-auto"></div>
-        <div class="mt-4 flex gap-2">
-          <button data-close-sheet class="flex-1 rounded-xl bg-mist py-3 text-sm font-bold text-ledger">取消</button>
-          <button data-action="import-monthly" class="flex-1 rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認匯入</button>
+        <div class="flex-1 overflow-y-auto px-4 py-3" id="ai-list"></div>
+        <div class="border-t border-ledger/10 bg-white px-5 py-4">
+          <button data-action="save-vendor-items" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認寫入（${items.length} 項）</button>
         </div>
       </section>
     </div>`;
-  renderMonthlyList();
+  state.aiItems = items.map((item) => ({ ...item }));
+  renderAiList();
 }
 
-function renderMonthlyList() {
-  const listEl = $('#monthly-list');
-  if (!listEl) return;
-  listEl.innerHTML = state.monthlyEntries.length ? state.monthlyEntries.map((entry, index) => `
-    <div class="flex items-start justify-between rounded-xl bg-mist/60 px-3 py-2.5">
-      <div class="min-w-0">
-        <p class="text-sm font-bold text-ledger">${escapeHtml(entry.date)} · ${escapeHtml(entry.store)}</p>
-        <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(entry.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
-      </div>
-      <button data-action="del-monthly-entry" data-index="${index}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
-    </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">沒有辨識到任何資料。</p>';
+async function saveVendorItems() {
+  const storeName = state.monthlyStore || '';
+  const items = state.aiItems.filter((item) => item.name.trim());
+  try {
+    await busy(async () => {
+      const result = await api('adminImportVendorMenu', { storeName, items });
+      closeModal();
+      toast(`已加入「${result.storeName}」：${result.created} 個新品項。`, 'success');
+      await refreshAdmin();
+    });
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 async function handleAiFile(event, storeId) {
@@ -1980,7 +2012,8 @@ function openSessionEditor(date, sessionId) {
 function openTopupModal(userId) {
   promptModal('儲值', [{ name: 'amount', label: '儲值金額（元）', type: 'number' }], async (v) => {
     const r = await api('adminTopUp', { userId, amount: Number(v.amount) });
-    toast(`儲值完成，已抵欠款 $${money(r.appliedToDebt)}。`, 'success');
+    toast(`儲值完成：抵欠款 $${money(r.appliedToDebt)}，餘額 ${fmtMoney(r.walletBalance)}，尚欠 $${money(r.remainingDebt)}。`, 'success');
+    await refreshAdmin();
   });
 }
 

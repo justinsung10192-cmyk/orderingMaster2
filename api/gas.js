@@ -68,6 +68,7 @@ const ADMIN = new Set([
   'aiRecognizeMenu',
   'aiRecognizeMonthlyMenu',
   'adminImportMonthlyMenu',
+  'adminImportVendorMenu',
 ]);
 
 export const config = { api: { bodyParser: false } };

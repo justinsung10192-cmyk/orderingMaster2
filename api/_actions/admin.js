@@ -93,15 +93,33 @@ export const actions = {
   async adminGetDashboard(data, ctx) {
     const date = String(data.date || todayString());
     const summary = await loadDaySummary(ctx.classId, date);
-    // 催繳人數
     const monday = mondayOf();
-    const overdue = await listRows('orders', { classId: ctx.classId });
+    const allOrders = await listRows('orders', { classId: ctx.classId });
+    const activeOrders = allOrders.filter((order) => !order.is_deleted);
     const overdueUserIds = new Set(
-      overdue
-        .filter((order) => !order.is_deleted && order.order_date < monday && outstandingOf(order) > 0)
+      activeOrders
+        .filter((order) => order.order_date < monday && outstandingOf(order) > 0)
         .map((order) => order.user_id),
     );
-    return { ...summary, overdueCount: overdueUserIds.size };
+
+    // 未繳總整理：所有仍有現金欠款的同學（不限日期），依座號排序
+    const debtorUserIds = [...new Set(activeOrders.map((order) => order.user_id).filter((id) => id != null))];
+    const debtorUsers = debtorUserIds.length ? await listRowsIn('users', 'id', debtorUserIds, { classId: ctx.classId }) : [];
+    const debtorUserById = new Map(debtorUsers.map((user) => [String(user.id), user]));
+    const debtMap = new Map();
+    activeOrders.forEach((order) => {
+      const out = outstandingOf(order);
+      if (out <= 0) return;
+      const uid = String(order.user_id);
+      const user = debtorUserById.get(uid);
+      const entry = debtMap.get(uid) || { userId: uid, seatNo: user?.seat_no || '', studentNo: user?.student_no || '', studentName: user?.student_name || '已刪除帳號', debt: 0, orderCount: 0 };
+      entry.debt = round2(entry.debt + out);
+      entry.orderCount += 1;
+      debtMap.set(uid, entry);
+    });
+    const debtors = [...debtMap.values()].sort((a, b) => num(a.seatNo) - num(b.seatNo));
+
+    return { ...summary, debtors, overdueCount: overdueUserIds.size };
   },
 
   async adminGetDaySummary(data, ctx) {

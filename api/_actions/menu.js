@@ -160,6 +160,24 @@ export const actions = {
     }
     return { ok: true, stores, items, sessions };
   },
+
+  // 匯入廠商菜單（每月更新）：依「廠商名稱」建立/更新店家與品項
+  async adminImportVendorMenu(data, ctx) {
+    const storeName = String(data.storeName || '').trim();
+    if (!storeName) throw appError('INVALID_INPUT', '請輸入廠商名稱。');
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) throw appError('INVALID_INPUT', '沒有可匯入的品項。');
+    if (items.length > 100) throw appError('INVALID_INPUT', '單次最多匯入 100 個品項。');
+    const storeResult = await findOrCreateStore(ctx.classId, storeName);
+    let created = 0;
+    for (const item of items) {
+      const name = String(item?.name || '').trim();
+      if (!name) continue;
+      const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options));
+      if (itemResult.created) created += 1;
+    }
+    return { ok: true, storeId: sid(storeResult.store.id), storeName: storeResult.store.name, created };
+  },
 };
 
 // ---- 每月菜單匯入輔助 ----
