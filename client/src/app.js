@@ -868,7 +868,13 @@ async function renderAdminMenu(content) {
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="font-serif text-xl font-black">店家與菜單</h2>
-          <button data-action="add-store" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">＋ 新增店家</button>
+          <div class="flex gap-2">
+            <button data-action="monthly-menu" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">📅 每月菜單</button>
+            <button data-action="add-store" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">＋ 新增店家</button>
+          </div>
+        </div>
+        <div class="rounded-2xl bg-white/70 px-4 py-3 text-xs leading-5 text-slate-500 ring-1 ring-ledger/5">
+          內訂菜單：上傳學校每月菜單照片，AI 會辨識每天日期與店家，自動建立當月場次（每月更新）。
         </div>
         ${catalog.stores.map((store) => renderStoreFolder(store)).join('') || '<p class="rounded-2xl bg-white/60 px-4 py-10 text-center text-sm text-slate-400">尚無店家，請先新增。</p>'}
       </div>`;
@@ -1525,6 +1531,9 @@ async function handleAction(action, target) {
     case 'edit-item': openItemEditor(null, target.getAttribute('data-item')); break;
     case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); await refreshAdmin(); }); break;
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
+    case 'monthly-menu': openMonthlyScan(); break;
+    case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
+    case 'import-monthly': await busy(async () => { const r = await api('adminImportMonthlyMenu', { entries: state.monthlyEntries, defaultCutoffTime: state.monthlyCutoff || '09:30' }); closeModal(); toast(`已匯入 ${r.stores} 店家、${r.items} 品項、${r.sessions} 場次。`, 'success'); await refreshAdmin(); }); break;
     case 'save-item': await saveItem(target.getAttribute('data-item')); break;
     case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
     case 'del-ai-item': {
@@ -1739,6 +1748,88 @@ function openAiScan(storeId) {
     </div>`;
   $('#ai-file-camera').addEventListener('change', (event) => handleAiFile(event, storeId));
   $('#ai-file-upload').addEventListener('change', (event) => handleAiFile(event, storeId));
+}
+
+/* ============================ 每月菜單（內訂） ============================ */
+function openMonthlyScan() {
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · MONTHLY</p><h2 class="font-serif text-xl font-black">上傳每月菜單</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="mt-4">
+          <label class="mb-1 block text-xs font-bold text-slate-500">每天截止時間（套用到整月）</label>
+          <input id="monthly-cutoff" type="time" value="09:30" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+        </div>
+        <p class="text-xs font-bold text-slate-500">選擇照片來源：</p>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-6">
+            <span class="text-3xl">📷</span><span class="mt-2 text-sm font-bold text-ledger">拍照</span>
+            <input id="monthly-camera" type="file" accept="image/*" capture="environment" class="hidden" />
+          </label>
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-6">
+            <span class="text-3xl">🖼️</span><span class="mt-2 text-sm font-bold text-ledger">上傳圖片</span>
+            <input id="monthly-upload" type="file" accept="image/*" class="hidden" />
+          </label>
+        </div>
+        <p id="monthly-status" class="mt-3 text-center text-xs text-slate-400">請上傳學校的每月菜單照片（含每天日期與店家）。</p>
+      </section>
+    </div>`;
+  const cutoffInput = $('#monthly-cutoff');
+  $('#monthly-camera').addEventListener('change', (event) => handleMonthlyFile(event, cutoffInput));
+  $('#monthly-upload').addEventListener('change', (event) => handleMonthlyFile(event, cutoffInput));
+}
+
+async function handleMonthlyFile(event, cutoffInput) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const statusEl = $('#monthly-status');
+  if (statusEl) statusEl.textContent = '圖片處理中…';
+  try {
+    const { imageBase64, mimeType } = await compressImage(file);
+    if (statusEl) statusEl.textContent = '辨識整月菜單中，請稍候…';
+    const result = await api('aiRecognizeMonthlyMenu', { imageBase64, mimeType });
+    state.monthlyCutoff = cutoffInput?.value || '09:30';
+    showMonthlyPreview(result.entries);
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message;
+    else toast(error.message, 'error');
+  }
+}
+
+function showMonthlyPreview(entries) {
+  state.monthlyEntries = entries;
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">辨識結果（${entries.length} 天）</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <p class="mt-2 text-xs text-slate-400">確認無誤後匯入，系統會自動建立店家、品項與每天場次（草稿）。</p>
+        <div id="monthly-list" class="mt-3 max-h-[52dvh] space-y-2 overflow-y-auto"></div>
+        <div class="mt-4 flex gap-2">
+          <button data-close-sheet class="flex-1 rounded-xl bg-mist py-3 text-sm font-bold text-ledger">取消</button>
+          <button data-action="import-monthly" class="flex-1 rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認匯入</button>
+        </div>
+      </section>
+    </div>`;
+  renderMonthlyList();
+}
+
+function renderMonthlyList() {
+  const listEl = $('#monthly-list');
+  if (!listEl) return;
+  listEl.innerHTML = state.monthlyEntries.length ? state.monthlyEntries.map((entry, index) => `
+    <div class="flex items-start justify-between rounded-xl bg-mist/60 px-3 py-2.5">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-ledger">${escapeHtml(entry.date)} · ${escapeHtml(entry.store)}</p>
+        <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(entry.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
+      </div>
+      <button data-action="del-monthly-entry" data-index="${index}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
+    </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">沒有辨識到任何資料。</p>';
 }
 
 async function handleAiFile(event, storeId) {

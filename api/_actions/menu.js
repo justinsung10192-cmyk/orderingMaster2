@@ -1,5 +1,5 @@
 // 動作：店家與菜單管理（資料夾式：店家 → 品項 → 客製選項）
-import { appError, sid, num } from '../_lib/util.js';
+import { appError, sid, num, weekLabelOf } from '../_lib/util.js';
 import { findOne, listRows, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore } from '../_lib/db.js';
 
 function normalizeOptions(options) {
@@ -129,4 +129,61 @@ export const actions = {
     }
     return { ok: true, created: count };
   },
+
+  // 匯入整月內訂菜單：建立/更新店家、品項與每天場次（草稿）
+  async adminImportMonthlyMenu(data, ctx) {
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) throw appError('INVALID_INPUT', '沒有可匯入的菜單資料。');
+    const cutoffTime = String(data.defaultCutoffTime || '').trim();
+    if (!/^\d{2}:\d{2}$/.test(cutoffTime)) throw appError('INVALID_INPUT', '請選擇每天截止時間。');
+
+    let stores = 0, items = 0, sessions = 0;
+    for (const entry of entries) {
+      const storeName = String(entry?.store || '').trim();
+      const date = String(entry?.date || '').trim();
+      if (!storeName || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const storeResult = await findOrCreateStore(ctx.classId, storeName);
+      if (storeResult.created) stores += 1;
+      if (Array.isArray(entry.items)) {
+        for (const item of entry.items) {
+          const name = String(item?.name || '').trim();
+          if (!name) continue;
+          const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options));
+          if (itemResult.created) items += 1;
+        }
+      }
+      const sessionResult = await findOrCreateSession(ctx.classId, storeResult.store.id, date, cutoffTime);
+      if (sessionResult.created) sessions += 1;
+    }
+    return { ok: true, stores, items, sessions };
+  },
 };
+
+// ---- 每月菜單匯入輔助 ----
+async function findOrCreateStore(classId, name) {
+  const existing = await findOne('stores', { name, is_deleted: false }, classId);
+  if (existing) return { store: existing, created: false };
+  return { store: await insertRow('stores', { class_id: classId, name, sort_order: 0 }), created: true };
+}
+
+async function findOrCreateMenuItem(classId, storeId, name, price, options) {
+  const existing = await findOne('menu_items', { store_id: storeId, name }, classId);
+  if (existing) return { item: existing, created: false };
+  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, sort_order: 0 }), created: true };
+}
+
+async function findOrCreateSession(classId, storeId, date, cutoffTime) {
+  const existing = await findOne('sessions', { store_id: storeId, order_date: date }, classId);
+  if (existing) return { session: existing, created: false }; // 含已刪除，尊重管理者手動刪除
+  const cutoff = new Date(`${date}T${cutoffTime}:00`);
+  const session = await insertRow('sessions', {
+    class_id: classId,
+    store_id: storeId,
+    order_date: date,
+    cutoff_time: cutoff.toISOString(),
+    week_label: weekLabelOf(`${date}T00:00:00`),
+    is_open: false, // 草稿，待管理者公布
+    start_notice_sent: false,
+  });
+  return { session, created: true };
+}

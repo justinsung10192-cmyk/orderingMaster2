@@ -66,6 +66,8 @@ const ADMIN = new Set([
   'adminResolveSeat',
   'adminSaveRecurring',
   'aiRecognizeMenu',
+  'aiRecognizeMonthlyMenu',
+  'adminImportMonthlyMenu',
 ]);
 
 export const config = { api: { bodyParser: false } };
