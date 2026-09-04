@@ -1,6 +1,6 @@
 // 序列化層：把資料庫列轉成前端 JSON（所有 id 字串化）
 import { sid, num, round2, todayString } from './util.js';
-import { supabase, findOne, listRows, listRowsIn, listMenuItemsForStore, listStoresForClass } from './db.js';
+import { supabase, findOne, listRows, listRowsIn, listMenuItemsForStore, listMenuItemsForStores, listStoresForClass } from './db.js';
 
 // 安全取出訂單品項（items 可能為陣列，也可能是舊資料的 JSON 字串）
 export function orderItems(order) {
@@ -161,14 +161,33 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
   const userOrders = orders.filter((order) => String(order.user_id) === String(user.id));
   const orderBySession = new Map(userOrders.map((order) => [String(order.session_id), order]));
 
+  // 批次載入店家與菜單（避免 N+1，加速菜單顯示）
+  const storeIds = [...new Set(sessions.map((session) => session.store_id))];
+  const [stores, allMenuItems] = await Promise.all([
+    storeIds.length ? listRowsIn('stores', 'id', storeIds, { classId }) : [],
+    storeIds.length ? listMenuItemsForStores(classId, storeIds, { includeInactive: false }) : [],
+  ]);
+  const storeById = new Map(stores.map((store) => [String(store.id), store]));
+  const menuByStore = new Map();
+  for (const item of allMenuItems) {
+    if (!menuByStore.has(String(item.store_id))) menuByStore.set(String(item.store_id), []);
+    menuByStore.get(String(item.store_id)).push(item);
+  }
+
   const result = [];
   for (const session of sessions) {
     if (!session.is_open) continue; // 草稿場次學生不可見
     const existingOrder = orderBySession.get(String(session.id)) || null;
     const cutoffPassed = new Date(session.cutoff_time).getTime() < Date.now();
     if (cutoffPassed && !existingOrder) continue;
-    const { storeName, menuItems } = await loadSessionWithMenu(session);
-    result.push(publicSession(session, storeName, menuItems, existingOrder, pureBalanceMode, user.wallet_balance));
+    const store = storeById.get(String(session.store_id));
+    const menuItems = (menuByStore.get(String(session.store_id)) || []).map((item) => ({
+      itemId: sid(item.id),
+      name: item.name,
+      price: num(item.price),
+      options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price) })),
+    }));
+    result.push(publicSession(session, store?.name || '未命名店家', menuItems, existingOrder, pureBalanceMode, user.wallet_balance));
   }
   return { sessions: result, orders: userOrders.map(publicOrder) };
 }

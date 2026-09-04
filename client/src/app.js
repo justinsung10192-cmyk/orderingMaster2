@@ -611,7 +611,10 @@ function renderWalletView(root) {
           <div><p class="text-sm text-emerald-100">目前儲值餘額</p><p id="wallet-balance" class="mt-1 font-serif text-4xl font-black tabular-nums">${fmtMoney(user.walletBalance)}</p></div>
           <span class="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">我的錢包</span>
         </div>
-        <button data-action="show-qr" class="mt-4 w-full rounded-xl bg-white/20 py-3 text-sm font-bold text-white">出示繳費 / 取餐 QR</button>
+        <div class="mt-4 grid grid-cols-2 gap-2">
+          <button data-action="show-qr-pay" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">💰 繳費 QR</button>
+          <button data-action="show-qr-pickup" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🍱 取餐 QR</button>
+        </div>
       </div>
 
       <section>
@@ -663,51 +666,32 @@ async function loadWalletDetail() {
 }
 
 /* ============================ 我的 QR / PIN ============================ */
-async function showMyQr() {
+async function showMyQr(type) {
   try {
-    const [payResult, pickupResult] = await Promise.all([
-      api('createVerification', { type: 'pay' }),
-      api('createVerification', { type: 'pickup' }),
-    ]);
+    const isPay = type === 'pay';
+    const result = await api('createVerification', { type: isPay ? 'pay' : 'pickup' });
     modalRoot.innerHTML = `
       <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
         <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
           <div class="flex items-center justify-between">
-            <div><p class="text-[11px] font-bold tracking-[.13em] text-slate-500">VERIFICATION PASS</p><h2 class="font-serif text-xl font-black">我的核銷通行證</h2></div>
+            <div><p class="text-[11px] font-bold tracking-[.13em] ${isPay ? 'text-apricot' : 'text-stamp'}">${isPay ? 'PAYMENT' : 'PICKUP'}</p><h2 class="font-serif text-xl font-black">${isPay ? '繳費 QR' : '取餐 QR'}</h2></div>
             <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
           </div>
-          <div class="mt-4 max-h-[68dvh] space-y-4 overflow-y-auto">
-            ${qrBlock('pay', '繳費 QR', '結帳付款用（一次繳清）', payResult)}
-            ${qrBlock('pickup', '取餐 QR', '領取餐點用', pickupResult)}
+          <div class="mt-4 flex flex-col items-center">
+            <div id="my-qr" class="rounded-2xl border-2 border-dashed border-ledger/20 p-3"></div>
+            <p class="mt-3 text-xs text-slate-400">4 位數 PIN 碼（5 分鐘後失效）</p>
+            <p class="pin-box mt-1 font-serif text-4xl font-black text-ledger">${result.pin}</p>
+            <p data-cutoff="${result.expiresAt}" class="mt-2 text-xs font-bold text-apricot">${cutoffRemaining(result.expiresAt).text}</p>
           </div>
-          <button data-close-sheet class="mt-5 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">完成</button>
+          <p class="mt-4 rounded-xl bg-mist/60 px-3 py-2.5 text-center text-xs text-slate-500">${isPay ? '出示給管理者結帳付款（一次繳清欠費）。' : '出示給管理者標記取餐。'}</p>
+          <button data-close-sheet class="mt-4 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">完成</button>
         </section>
       </div>`;
-    if (window.QRCode) {
-      new window.QRCode($('#qr-pay'), { text: JSON.stringify(payResult.payload), width: 168, height: 168 });
-      new window.QRCode($('#qr-pickup'), { text: JSON.stringify(pickupResult.payload), width: 168, height: 168 });
-    } else {
-      ['qr-pay', 'qr-pickup'].forEach((id) => { const el = $('#' + id); if (el) el.textContent = 'QR 庫載入中，請稍後重試。'; });
-    }
+    if (window.QRCode) new window.QRCode($('#my-qr'), { text: JSON.stringify(result.payload), width: 200, height: 200 });
+    else { const el = $('#my-qr'); if (el) el.textContent = 'QR 庫載入中，請稍後重試。'; }
   } catch (error) {
     toast(error.message, 'error');
   }
-}
-
-function qrBlock(id, label, subtitle, result) {
-  return `
-    <div class="rounded-2xl bg-mist/60 p-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="font-bold text-ledger">${label}</p>
-          <p class="text-xs text-slate-400">${subtitle}</p>
-        </div>
-        <span class="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-400">5 分鐘內有效</span>
-      </div>
-      <div id="qr-${id}" class="mt-3 flex justify-center rounded-2xl border-2 border-dashed border-ledger/20 bg-white p-3"></div>
-      <p class="mt-3 text-center text-xs text-slate-400">4 位數 PIN 碼</p>
-      <p class="pin-box text-center font-serif text-3xl font-black text-ledger">${result.pin}</p>
-    </div>`;
 }
 
 /* ============================ 管理（Admin） ============================ */
@@ -1510,7 +1494,8 @@ async function onClick(event) {
 async function handleAction(action, target) {
   switch (action) {
     // 學生
-    case 'show-qr': await showMyQr(); break;
+    case 'show-qr-pay': await showMyQr('pay'); break;
+    case 'show-qr-pickup': await showMyQr('pickup'); break;
     case 'refresh-wallet': await loadWalletDetail(); break;
     case 'manual-refresh': await manualRefresh(); break;
     case 'toggle-notifications': await toggleNotifications(); break;

@@ -140,3 +140,14 @@ export async function listMenuItemsForStore(classId, storeId, { includeInactive 
   if (!includeInactive) filters.is_active = true;
   return listRows('menu_items', { classId, filters, order: 'sort_order' });
 }
+
+// 一次載入多個店家的菜單（避免 N+1 查詢，加速菜單顯示）
+export async function listMenuItemsForStores(classId, storeIds, { includeInactive = true } = {}) {
+  if (!storeIds || !storeIds.length) return [];
+  let query = supabase.from('menu_items').select('*').in('store_id', storeIds).eq('class_id', classId);
+  if (!includeInactive) query = query.eq('is_active', true);
+  query = query.order('sort_order', { ascending: true });
+  const { data, error } = await query;
+  if (error) throwDb(error);
+  return data || [];
+}
