@@ -1,7 +1,7 @@
 // 動作：產生臨時 QR + 4 位 PIN、管理者掃碼/輸入 PIN 核銷、取餐標記
 import { appError, sid, num, round2, randomDigits, sha256Hex, todayString } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows } from '../_lib/db.js';
-import { outstandingOf } from '../_lib/serialize.js';
+import { outstandingOf, itemNameOf } from '../_lib/serialize.js';
 import { sendPushToUser } from '../_lib/push.js';
 
 const VERIFY_MINUTES = 5;
@@ -35,7 +35,7 @@ async function resolveContext(classId, userId) {
       sessionId: sid(order.session_id),
       orderDate: session?.order_date || '',
       storeName: store?.name || '未指定店家',
-      itemName: (order.items || []).map((item) => `${Number(item.quantity) > 1 ? `${Number(item.quantity)}×` : ''}${item.itemName}`).join('、'),
+      itemName: itemNameOf(order),
       totalPrice: num(order.total_price),
       paymentStatus: order.payment_status,
       pickupStatus: order.pickup_status,
@@ -61,9 +61,10 @@ export const actions = {
       const session = await findOne('sessions', { id: sessionId }, ctx.classId);
       if (!session) throw appError('NOT_FOUND', '找不到場次。');
     }
+    const intent = data.type === 'pay' ? 'pay' : 'pickup';
     const pin = randomDigits(4);
     const exp = Date.now() + VERIFY_MINUTES * 60 * 1000;
-    const payload = { v: 1, uid: sid(ctx.user.id), pin, type: 'verify', exp, sid: sessionId ? sid(sessionId) : '' };
+    const payload = { v: 1, uid: sid(ctx.user.id), pin, type: intent, exp, sid: sessionId ? sid(sessionId) : '' };
     await insertRow('verification_records', {
       class_id: ctx.classId,
       session_id: sessionId,
@@ -88,7 +89,8 @@ export const actions = {
     if (new Date(record.expires_at).getTime() < Date.now()) throw appError('EXPIRED', 'QR Code 已過期，請學生重新產生。');
 
     await updateRows('verification_records', { id: record.id }, { status: 'Resolved', resolved_at: new Date().toISOString() });
-    return resolveContext(ctx.classId, payload.uid);
+    const context = await resolveContext(ctx.classId, payload.uid);
+    return { ...context, intent: payload.type === 'pay' ? 'pay' : 'pickup' };
   },
 
   async adminResolvePin(data, ctx) {
@@ -104,7 +106,8 @@ export const actions = {
     if (!payload || !payload.uid) throw appError('INVALID_PIN', 'PIN 資料不正確。');
 
     await updateRows('verification_records', { id: record.id }, { status: 'Resolved', resolved_at: new Date().toISOString() });
-    return resolveContext(ctx.classId, payload.uid);
+    const context = await resolveContext(ctx.classId, payload.uid);
+    return { ...context, intent: payload.type === 'pay' ? 'pay' : 'pickup' };
   },
 
   // 直接輸入座號／學號查詢當天訂單（不需掃碼或 PIN）
@@ -124,7 +127,8 @@ export const actions = {
       if (student) break;
     }
     if (!student) throw appError('NOT_FOUND', '找不到此座號／學號的同學。');
-    return resolveContext(ctx.classId, student.id);
+    const context = await resolveContext(ctx.classId, student.id);
+    return { ...context, intent: 'all' };
   },
 
   async adminConfirmPickup(data, ctx) {

@@ -611,7 +611,7 @@ function renderWalletView(root) {
           <div><p class="text-sm text-emerald-100">目前儲值餘額</p><p id="wallet-balance" class="mt-1 font-serif text-4xl font-black tabular-nums">${fmtMoney(user.walletBalance)}</p></div>
           <span class="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">我的錢包</span>
         </div>
-        <button data-action="show-qr" class="mt-4 w-full rounded-xl bg-white/20 py-3 text-sm font-bold text-white">出示取餐 QR / PIN</button>
+        <button data-action="show-qr" class="mt-4 w-full rounded-xl bg-white/20 py-3 text-sm font-bold text-white">出示繳費 / 取餐 QR</button>
       </div>
 
       <section>
@@ -665,8 +665,10 @@ async function loadWalletDetail() {
 /* ============================ 我的 QR / PIN ============================ */
 async function showMyQr() {
   try {
-    const result = await api('createVerification', {});
-    const payloadText = JSON.stringify(result.payload);
+    const [payResult, pickupResult] = await Promise.all([
+      api('createVerification', { type: 'pay' }),
+      api('createVerification', { type: 'pickup' }),
+    ]);
     modalRoot.innerHTML = `
       <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
         <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
@@ -674,20 +676,38 @@ async function showMyQr() {
             <div><p class="text-[11px] font-bold tracking-[.13em] text-slate-500">VERIFICATION PASS</p><h2 class="font-serif text-xl font-black">我的核銷通行證</h2></div>
             <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
           </div>
-          <div class="mt-4 flex flex-col items-center">
-            <div id="my-qr" class="rounded-2xl border-2 border-dashed border-ledger/20 p-3"></div>
-            <p class="mt-3 text-xs text-slate-400">4 位數 PIN 碼（臨時，5 分鐘後失效）</p>
-            <p class="pin-box mt-1 font-serif text-4xl font-black text-ledger">${result.pin}</p>
-            <p data-cutoff="${result.expiresAt}" class="mt-2 text-xs font-bold text-apricot">${cutoffRemaining(result.expiresAt).text}</p>
+          <div class="mt-4 max-h-[68dvh] space-y-4 overflow-y-auto">
+            ${qrBlock('pay', '繳費 QR', '結帳付款用（一次繳清）', payResult)}
+            ${qrBlock('pickup', '取餐 QR', '領取餐點用', pickupResult)}
           </div>
           <button data-close-sheet class="mt-5 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">完成</button>
         </section>
       </div>`;
-    if (window.QRCode) new window.QRCode($('#my-qr'), { text: payloadText, width: 180, height: 180 });
-    else $('#my-qr').textContent = 'QR 庫載入中，請稍後重試。';
+    if (window.QRCode) {
+      new window.QRCode($('#qr-pay'), { text: JSON.stringify(payResult.payload), width: 168, height: 168 });
+      new window.QRCode($('#qr-pickup'), { text: JSON.stringify(pickupResult.payload), width: 168, height: 168 });
+    } else {
+      ['qr-pay', 'qr-pickup'].forEach((id) => { const el = $('#' + id); if (el) el.textContent = 'QR 庫載入中，請稍後重試。'; });
+    }
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+
+function qrBlock(id, label, subtitle, result) {
+  return `
+    <div class="rounded-2xl bg-mist/60 p-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="font-bold text-ledger">${label}</p>
+          <p class="text-xs text-slate-400">${subtitle}</p>
+        </div>
+        <span class="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-400">5 分鐘內有效</span>
+      </div>
+      <div id="qr-${id}" class="mt-3 flex justify-center rounded-2xl border-2 border-dashed border-ledger/20 bg-white p-3"></div>
+      <p class="mt-3 text-center text-xs text-slate-400">4 位數 PIN 碼</p>
+      <p class="pin-box text-center font-serif text-3xl font-black text-ledger">${result.pin}</p>
+    </div>`;
 }
 
 /* ============================ 管理（Admin） ============================ */
@@ -759,6 +779,21 @@ async function renderAdminDashboard(content) {
           ${statCard('未繳', `$${money(totals.unpaidAmount)}`)}
           ${statCard('已取餐', totals.pickedUp)}
         </div>
+        ${data.itemTotals.length ? `
+          <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+            <p class="text-[11px] font-bold tracking-[.13em] text-stamp">ITEM SUMMARY</p>
+            <h3 class="font-serif text-lg font-black">品項總整理</h3>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+              ${data.itemTotals.map((item) => `
+                <div class="flex items-center justify-between rounded-lg bg-mist/60 px-3 py-2.5">
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-bold text-ledger">${escapeHtml(item.name)}</p>
+                    ${item.options.length ? `<p class="truncate text-xs text-slate-400">${escapeHtml(item.options.join('、'))}</p>` : ''}
+                  </div>
+                  <span class="ml-2 shrink-0 rounded-full bg-stamp px-2 py-0.5 text-xs font-bold text-white">×${item.quantity}</span>
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
         ${data.overdueCount ? `<button data-action="view-overdue" class="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600">⚠️ 有 ${data.overdueCount} 位同學尚未繳費，點此查看</button>` : ''}
 
         ${data.sessionStats.length ? data.sessionStats.map((session) => `
@@ -1276,6 +1311,8 @@ function renderVerifyResult(result) {
 }
 
 function verifyResultHtml(result) {
+  const intentLabel = result.intent === 'pay' ? '繳費' : result.intent === 'pickup' ? '取餐' : '查詢';
+  const intentColor = result.intent === 'pay' ? 'bg-apricot/15 text-apricot' : result.intent === 'pickup' ? 'bg-stamp/15 text-stamp' : 'bg-mist text-slate-500';
   return `
     <div class="rounded-2xl bg-white p-5 shadow-paper ring-1 ring-ledger/5">
       <div class="flex items-center gap-3">
@@ -1284,6 +1321,7 @@ function verifyResultHtml(result) {
           <p class="font-serif text-lg font-black">${escapeHtml(result.student.name)}</p>
           <p class="text-xs text-slate-500">餘額 ${fmtMoney(result.walletBalance)} · 未繳 ${fmtMoney(result.totalDebt)}</p>
         </div>
+        <span class="ml-auto shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${intentColor}">${intentLabel}</span>
       </div>
 
       ${result.todayOrders.length ? `

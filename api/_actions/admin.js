@@ -2,7 +2,7 @@
 import { appError, sid, num, round2, todayString, weekdayName, monthDay, mondayOf } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass } from '../_lib/db.js';
 import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
-import { dashboardOrderRow, outstandingOf, publicUser } from '../_lib/serialize.js';
+import { dashboardOrderRow, outstandingOf, publicUser, orderItems } from '../_lib/serialize.js';
 
 // 班級至少保留一位管理者
 async function ensureNotLastAdmin(classId, userId) {
@@ -47,12 +47,25 @@ async function loadDaySummary(classId, date) {
     };
   });
 
+  const itemMap = new Map();
+  orders.forEach((order) => {
+    orderItems(order).forEach((item) => {
+      const optKey = (item.options || []).map((option) => option.name).join('、');
+      const key = `${item.itemName}|||${optKey}`;
+      const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name), quantity: 0 };
+      entry.quantity += Number(item.quantity) || 0;
+      itemMap.set(key, entry);
+    });
+  });
+  const itemTotals = [...itemMap.values()].sort((a, b) => b.quantity - a.quantity);
+
   return {
     date,
     weekday: weekdayName(date),
     monthDay: monthDay(date),
     sessionStats,
     orders: rows,
+    itemTotals,
     totals: {
       orderCount: rows.length,
       totalAmount: round2(rows.reduce((sum, row) => sum + row.totalPrice, 0)),

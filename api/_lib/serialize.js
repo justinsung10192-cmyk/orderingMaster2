@@ -2,6 +2,16 @@
 import { sid, num, round2, todayString } from './util.js';
 import { supabase, findOne, listRows, listRowsIn, listMenuItemsForStore, listStoresForClass } from './db.js';
 
+// 安全取出訂單品項（items 可能為陣列，也可能是舊資料的 JSON 字串）
+export function orderItems(order) {
+  const raw = order?.items;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; }
+  }
+  return [];
+}
+
 export function publicUser(user) {
   return {
     id: sid(user.id),
@@ -18,14 +28,14 @@ export function publicUser(user) {
 }
 
 export function itemNameOf(order) {
-  const items = Array.isArray(order.items) ? order.items : [];
+  const items = orderItems(order);
   if (!items.length) return '（無餐點）';
   const label = (item) => `${Number(item.quantity) > 1 ? `${Number(item.quantity)}×` : ''}${item.itemName || ''}`;
   return items.map(label).join('、');
 }
 
 export function selectedOptionsOf(order) {
-  const items = Array.isArray(order.items) ? order.items : [];
+  const items = orderItems(order);
   if (items.length !== 1) return [];
   return (items[0].options || []).map((option) => ({ name: option.name, price: num(option.price) }));
 }
@@ -39,7 +49,7 @@ export function publicOrder(order) {
   return {
     orderId: sid(order.id),
     sessionId: sid(order.session_id),
-    items: (Array.isArray(order.items) ? order.items : []).map((item) => ({
+    items: orderItems(order).map((item) => ({
       itemId: sid(item.itemId),
       itemName: item.itemName,
       quantity: num(item.quantity),

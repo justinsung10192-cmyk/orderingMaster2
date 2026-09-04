@@ -1,7 +1,7 @@
 // 動作：錢包歷史、管理員儲值、現金結清、餘額手動調整
 import { appError, sid, num, round2 } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, callRpc, listStoresForClass } from '../_lib/db.js';
-import { publicUser, outstandingOf } from '../_lib/serialize.js';
+import { publicUser, outstandingOf, itemNameOf } from '../_lib/serialize.js';
 
 const KIND_LABEL = {
   TopUp: '儲值',
@@ -52,7 +52,7 @@ export const actions = {
           sessionId: sid(order.session_id),
           orderDate: session?.order_date || '',
           storeName: store?.name || '未指定店家',
-          itemName: (order.items || []).map((item) => `${Number(item.quantity) > 1 ? `${Number(item.quantity)}×` : ''}${item.itemName}`).join('、'),
+          itemName: itemNameOf(order),
           totalPrice: num(order.total_price),
           paymentStatus: order.payment_status,
           pickupStatus: order.pickup_status,
