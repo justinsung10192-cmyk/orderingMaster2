@@ -706,6 +706,7 @@ function renderAdminView(root) {
   const tabs = [
     { id: 'dashboard', label: '總覽' },
     { id: 'menu', label: '菜單' },
+    { id: 'daily', label: '每日菜單' },
     { id: 'schedule', label: '排程' },
     { id: 'verify', label: '核銷' },
     { id: 'users', label: '帳號' },
@@ -734,6 +735,7 @@ function renderAdminTab() {
   const handlers = {
     dashboard: renderAdminDashboard,
     menu: renderAdminMenu,
+    daily: renderAdminDailyMenu,
     schedule: renderAdminSchedule,
     verify: renderAdminVerify,
     users: renderAdminUsers,
@@ -868,13 +870,7 @@ async function renderAdminMenu(content) {
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="font-serif text-xl font-black">店家與菜單</h2>
-          <div class="flex gap-2">
-            <button data-action="monthly-menu" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">📅 每月菜單</button>
-            <button data-action="add-store" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">＋ 新增店家</button>
-          </div>
-        </div>
-        <div class="rounded-2xl bg-white/70 px-4 py-3 text-xs leading-5 text-slate-500 ring-1 ring-ledger/5">
-          內訂菜單：上傳學校每月菜單照片，AI 會辨識每天日期與店家，自動建立當月場次（每月更新）。
+          <button data-action="add-store" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">＋ 新增店家</button>
         </div>
         ${catalog.stores.map((store) => renderStoreFolder(store)).join('') || '<p class="rounded-2xl bg-white/60 px-4 py-10 text-center text-sm text-slate-400">尚無店家，請先新增。</p>'}
       </div>`;
@@ -917,6 +913,54 @@ function renderStoreFolder(store) {
           </div>
         </div>` : ''}
     </section>`;
+}
+
+/* ----- 每日菜單（內訂） ----- */
+async function renderAdminDailyMenu(content) {
+  try {
+    const month = state.admin.dailyMonth || todayString().slice(0, 7);
+    const data = await api('adminGetDailyMenus', { month });
+    state.admin.dailyMonth = month;
+    content.innerHTML = `
+      <div class="space-y-4">
+        <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="text-[11px] font-bold tracking-[.13em] text-stamp">DAILY MENU</p>
+              <h2 class="font-serif text-xl font-black">每日菜單（內訂）</h2>
+            </div>
+            <div class="flex gap-2">
+              <input id="daily-month" type="month" value="${month}" class="w-36 rounded-xl border border-slate-200 px-2 py-2 text-sm outline-none focus:border-ledger" />
+              <button data-action="monthly-menu" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">＋ 上傳菜單</button>
+            </div>
+          </div>
+          <p class="mt-1 text-xs text-slate-400">上傳各廠商的每月菜單，系統會自動排成每天場次並顯示在「排程」中。</p>
+        </div>
+        ${data.days.length ? data.days.map((day) => `
+          <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+            <div class="flex items-center gap-2">
+              <span class="rounded-lg bg-ledger px-2 py-1 text-xs font-bold text-white">${escapeHtml(monthDay(day.date))}</span>
+              <span class="text-xs text-slate-400">${escapeHtml(day.weekday)}</span>
+            </div>
+            <div class="mt-2 space-y-1.5">
+              ${day.vendors.map((vendor) => `
+                <div class="flex items-start justify-between rounded-lg bg-mist/50 px-3 py-2">
+                  <div class="min-w-0">
+                    <p class="text-sm font-bold text-ledger">${escapeHtml(vendor.storeName)}</p>
+                    <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(vendor.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
+                  </div>
+                  <button data-action="del-daily" data-date="${day.date}" data-store="${vendor.storeId}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
+                </div>`).join('')}
+            </div>
+          </div>`).join('') : '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">這個月尚無每日菜單，點「＋ 上傳菜單」開始匯入。</p>'}
+      </div>`;
+    $('#daily-month').addEventListener('change', (event) => {
+      state.admin.dailyMonth = event.target.value;
+      renderAdminTab();
+    });
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 /* ----- 排程 ----- */
@@ -1564,6 +1608,7 @@ async function handleAction(action, target) {
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': openMonthlyScan(); break;
     case 'save-vendor-items': await saveVendorItems(); break;
+    case 'del-daily': openConfirm('刪除當天菜單', '會刪除該店家當天的品項並將場次標記刪除，確定嗎？', async () => { await api('adminDeleteDailyMenu', { date: target.getAttribute('data-date'), storeId: target.getAttribute('data-store') }); toast('已刪除。', 'success'); await refreshAdmin(); }); break;
     case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
     case 'save-item': await saveItem(target.getAttribute('data-item')); break;
     case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
@@ -1793,6 +1838,8 @@ function openMonthlyScan() {
         <div class="mt-4">
           <label class="mb-1 block text-xs font-bold text-slate-500">廠商名稱（店家）</label>
           <input id="monthly-store" placeholder="例如：正園便當、太師傅…" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          <label class="mb-1 block text-xs font-bold text-slate-500">菜單月份（決定日期年份）</label>
+          <input id="monthly-month" type="month" value="${todayString().slice(0, 7)}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
         </div>
         <p class="text-xs font-bold text-slate-500">選擇檔案（PDF 或照片，可陸續上傳多家）：</p>
         <div class="mt-2 grid grid-cols-2 gap-3">
@@ -1811,15 +1858,18 @@ function openMonthlyScan() {
       </section>
     </div>`;
   const storeInput = $('#monthly-store');
-  $('#monthly-pdf').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
-  $('#monthly-img').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
+  const monthInput = $('#monthly-month');
+  $('#monthly-pdf').addEventListener('change', (event) => handleMonthlyFile(event, storeInput, monthInput));
+  $('#monthly-img').addEventListener('change', (event) => handleMonthlyFile(event, storeInput, monthInput));
 }
 
-async function handleMonthlyFile(event, storeInput) {
+async function handleMonthlyFile(event, storeInput, monthInput) {
   const file = event.target.files?.[0];
   if (!file) return;
   const storeName = (storeInput?.value || '').trim();
   if (!storeName) return toast('請先輸入廠商名稱。', 'error');
+  const month = (monthInput?.value || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) return toast('請選擇菜單月份。', 'error');
   const statusEl = $('#monthly-status');
   if (statusEl) statusEl.textContent = '檔案處理中…';
   try {
@@ -1832,7 +1882,7 @@ async function handleMonthlyFile(event, storeInput) {
       ({ imageBase64, mimeType } = await compressImage(file));
     }
     if (statusEl) statusEl.textContent = `辨識「${storeName}」每日菜單中，請稍候…`;
-    const result = await api('aiRecognizeMonthlyMenu', { imageBase64, mimeType });
+    const result = await api('aiRecognizeMonthlyMenu', { imageBase64, mimeType, month });
     showVendorPreview(storeName, result.entries);
   } catch (error) {
     if (statusEl) statusEl.textContent = error.message;

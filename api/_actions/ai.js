@@ -14,16 +14,19 @@ const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上�
 5. 忽略照片中的標語、電話、地址等非菜單內容。
 6. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
 
-const MONTHLY_PROMPT = `你是學校「每月菜單」文字辨識助手。請辨識這份菜單，找出「每一天」（或星期一到五）提供的餐點與價格。
+function monthlyPrompt(month) {
+  const [year, mon] = month.split('-');
+  return `你是學校「每月菜單」文字辨識助手。請辨識這份菜單，找出「每一天」（或星期一到五）提供的餐點與價格。這份菜單的年份月份是 ${year} 年 ${Number(mon)} 月，所有日期都以此為準。
 規則：
 1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
 2. 每一天是一個物件，格式為：
    {"date":"YYYY-MM-DD","items":[{"name":"餐點名稱","price":數字,"options":["選項"]}]}
-3. date 用西元 YYYY-MM-DD。若菜單只有「星期」而無日期（如「星期一 香酥雞排」），表示每週都一樣，請把當月份每個該星期都展開成具體日期。
-4. 若菜單是「日期區間」（如 8/31-9/4），請把區間內每個上學日都展開成具體日期。
+3. date 的年份一定是 ${year} 年。若菜單只有「星期」而無日期（如「星期一 香酥雞排」），表示每週都一樣，請把 ${year} 年 ${Number(mon)} 月的每個該星期都展開成具體日期。
+4. 若菜單是「日期區間」（如 8/31-9/4），請把區間內每個上學日都展開成具體日期（年份 ${year}）。
 5. 若有多種價位/編號（如 1號/2號/3號、A餐/B餐、100元/85元/75元），items 要分開列出，名稱帶上編號或餐名（如「1號 池上」）。
 6. price 必須是數字（新台幣元），無法辨識時填 0；options 是客製選項字串陣列，沒有則為空陣列 []。
 7. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
+}
 
 function normalizeItems(parsed) {
   const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
@@ -144,7 +147,9 @@ export const actions = {
 
   async aiRecognizeMonthlyMenu(data) {
     const { imageBase64, mimeType } = validateImage(data);
-    const { provider, result } = await recognize(imageBase64, mimeType, MONTHLY_PROMPT, normalizeMonthly);
+    const month = String(data.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇菜單月份。');
+    const { provider, result } = await recognize(imageBase64, mimeType, monthlyPrompt(month), normalizeMonthly);
     return { provider, entries: result };
   },
 };

@@ -1,6 +1,6 @@
 // 動作：店家與菜單管理（資料夾式：店家 → 品項 → 客製選項）
-import { appError, sid, num, weekLabelOf } from '../_lib/util.js';
-import { findOne, listRows, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores } from '../_lib/db.js';
+import { appError, sid, num, weekLabelOf, weekdayName } from '../_lib/util.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores } from '../_lib/db.js';
 
 function normalizeOptions(options) {
   if (!Array.isArray(options)) return [];
@@ -28,17 +28,19 @@ export const actions = {
       storeId: sid(store.id),
       name: store.name,
       isActive: Boolean(store.is_active),
-      items: (itemsByStore.get(String(store.id)) || []).map((item) => ({
-        itemId: sid(item.id),
-        name: item.name,
-        price: num(item.price),
-        menuDate: item.menu_date || '',
-        options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
-          name: option.name,
-          price: num(option.price),
+      items: (itemsByStore.get(String(store.id)) || [])
+        .filter((item) => !item.menu_date || item.menu_date === '1970-01-01')
+        .map((item) => ({
+          itemId: sid(item.id),
+          name: item.name,
+          price: num(item.price),
+          menuDate: item.menu_date || '',
+          options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
+            name: option.name,
+            price: num(option.price),
+          })),
+          isActive: Boolean(item.is_active),
         })),
-        isActive: Boolean(item.is_active),
-      })),
     }));
     return { stores: result };
   },
@@ -188,6 +190,53 @@ export const actions = {
       if (sessionResult.created) createdSessions += 1;
     }
     return { ok: true, storeId: sid(storeResult.store.id), storeName: storeResult.store.name, createdItems, createdSessions };
+  },
+
+  // 每日菜單專屬介面：依月份列出每天各店家的餐點
+  async adminGetDailyMenus(data, ctx) {
+    const month = String(data.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇月份。');
+    const allItems = await listRows('menu_items', { classId: ctx.classId });
+    const datedItems = allItems.filter((item) => item.menu_date && item.menu_date !== '1970-01-01' && item.menu_date.startsWith(month));
+    const storeIds = [...new Set(datedItems.map((item) => item.store_id))];
+    const stores = storeIds.length ? await listRowsIn('stores', 'id', storeIds, { classId: ctx.classId }) : [];
+    const storeById = new Map(stores.map((store) => [String(store.id), store]));
+    const byDate = new Map();
+    for (const item of datedItems) {
+      if (!byDate.has(item.menu_date)) byDate.set(item.menu_date, []);
+      byDate.get(item.menu_date).push(item);
+    }
+    const days = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, items]) => {
+      const byStore = new Map();
+      for (const item of items) {
+        if (!byStore.has(String(item.store_id))) byStore.set(String(item.store_id), []);
+        byStore.get(String(item.store_id)).push(item);
+      }
+      return {
+        date,
+        weekday: weekdayName(date),
+        vendors: [...byStore.entries()].map(([storeIdStr, storeItems]) => ({
+          storeId: storeIdStr,
+          storeName: storeById.get(storeIdStr)?.name || '未命名店家',
+          items: storeItems.map((item) => ({ itemId: sid(item.id), name: item.name, price: num(item.price) })),
+        })),
+      };
+    });
+    return { month, days };
+  },
+
+  // 刪除某天的某店家每日菜單（品項 + 場次）
+  async adminDeleteDailyMenu(data, ctx) {
+    const storeId = Number(data.storeId);
+    const date = String(data.date || '').trim();
+    if (!storeId) throw appError('INVALID_INPUT', '店家不正確。');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw appError('INVALID_INPUT', '日期不正確。');
+    await deleteRows('menu_items', { class_id: ctx.classId, store_id: storeId, menu_date: date });
+    const session = await findOne('sessions', { store_id: storeId, order_date: date }, ctx.classId);
+    if (session && !session.is_deleted) {
+      await updateRows('sessions', { id: session.id }, { is_deleted: true });
+    }
+    return { ok: true };
   },
 };
 

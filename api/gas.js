@@ -69,6 +69,8 @@ const ADMIN = new Set([
   'aiRecognizeMonthlyMenu',
   'adminImportMonthlyMenu',
   'adminImportVendorMenu',
+  'adminGetDailyMenus',
+  'adminDeleteDailyMenu',
 ]);
 
 export const config = { api: { bodyParser: false } };
