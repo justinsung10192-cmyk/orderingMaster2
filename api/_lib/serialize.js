@@ -109,7 +109,8 @@ export function computeOrderItems(menuItems, selections) {
 
 export async function loadSessionWithMenu(session) {
   const store = await findOne('stores', { id: session.store_id }, session.class_id);
-  const menuItems = await listMenuItemsForStore(session.class_id, session.store_id, { includeInactive: false });
+  const menuItems = (await listMenuItemsForStore(session.class_id, session.store_id, { includeInactive: false }))
+    .filter((item) => !item.menu_date || item.menu_date === '1970-01-01' || item.menu_date === session.order_date);
   return {
     session,
     storeName: store?.name || '未命名店家',
@@ -181,12 +182,14 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
     const cutoffPassed = new Date(session.cutoff_time).getTime() < Date.now();
     if (cutoffPassed && !existingOrder) continue;
     const store = storeById.get(String(session.store_id));
-    const menuItems = (menuByStore.get(String(session.store_id)) || []).map((item) => ({
-      itemId: sid(item.id),
-      name: item.name,
-      price: num(item.price),
-      options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price) })),
-    }));
+    const menuItems = (menuByStore.get(String(session.store_id)) || [])
+      .filter((item) => !item.menu_date || item.menu_date === '1970-01-01' || item.menu_date === session.order_date)
+      .map((item) => ({
+        itemId: sid(item.id),
+        name: item.name,
+        price: num(item.price),
+        options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price) })),
+      }));
     result.push(publicSession(session, store?.name || '未命名店家', menuItems, existingOrder, pureBalanceMode, user.wallet_balance));
   }
   return { sessions: result, orders: userOrders.map(publicOrder) };

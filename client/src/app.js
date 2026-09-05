@@ -903,7 +903,7 @@ function renderStoreFolder(store) {
           ${store.items.map((item) => `
             <div class="flex items-center justify-between rounded-xl px-2 py-2.5">
               <div class="min-w-0">
-                <p class="text-sm font-bold text-ledger">${escapeHtml(item.name)}</p>
+                <p class="text-sm font-bold text-ledger">${escapeHtml(item.name)}${item.menuDate && item.menuDate !== '1970-01-01' ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">${monthDay(item.menuDate)}</span>` : ''}</p>
                 <p class="text-xs text-slate-400">$${money(item.price)}${item.options.length ? ' · ' + escapeHtml(item.options.map((o) => o.name + (Number(o.price) ? `(+${money(o.price)})` : '')).join('、')) : ''}</p>
               </div>
               <div class="flex gap-1.5">
@@ -1564,6 +1564,7 @@ async function handleAction(action, target) {
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': openMonthlyScan(); break;
     case 'save-vendor-items': await saveVendorItems(); break;
+    case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
     case 'save-item': await saveItem(target.getAttribute('data-item')); break;
     case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
     case 'del-ai-item': {
@@ -1786,30 +1787,32 @@ function openMonthlyScan() {
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
       <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
         <div class="flex items-center justify-between">
-          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · 每月菜單</p><h2 class="font-serif text-xl font-black">上傳廠商菜單</h2></div>
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · 每月菜單</p><h2 class="font-serif text-xl font-black">上傳廠商每日菜單</h2></div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
         <div class="mt-4">
           <label class="mb-1 block text-xs font-bold text-slate-500">廠商名稱（店家）</label>
-          <input id="monthly-store" placeholder="例如：a 店家、八方雲集…" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          <input id="monthly-store" placeholder="例如：正園便當、太師傅…" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
         </div>
-        <p class="text-xs font-bold text-slate-500">選擇照片來源（可陸續上傳多家）：</p>
+        <p class="text-xs font-bold text-slate-500">選擇檔案（PDF 或照片，可陸續上傳多家）：</p>
         <div class="mt-2 grid grid-cols-2 gap-3">
           <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-6">
-            <span class="text-3xl">📷</span><span class="mt-2 text-sm font-bold text-ledger">拍照</span>
-            <input id="monthly-camera" type="file" accept="image/*" capture="environment" class="hidden" />
+            <span class="text-3xl">📄</span><span class="mt-2 text-sm font-bold text-ledger">PDF 檔案</span>
+            <span class="mt-1 text-xs text-slate-400">每月菜單</span>
+            <input id="monthly-pdf" type="file" accept="application/pdf,.pdf" class="hidden" />
           </label>
           <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-6">
-            <span class="text-3xl">🖼️</span><span class="mt-2 text-sm font-bold text-ledger">上傳圖片</span>
-            <input id="monthly-upload" type="file" accept="image/*" class="hidden" />
+            <span class="text-3xl">📷</span><span class="mt-2 text-sm font-bold text-ledger">拍照/圖片</span>
+            <span class="mt-1 text-xs text-slate-400">相機或相簿</span>
+            <input id="monthly-img" type="file" accept="image/*" capture="environment" class="hidden" />
           </label>
         </div>
-        <p id="monthly-status" class="mt-3 text-center text-xs text-slate-400">每家廠商分別上傳一張菜單照片，辨識結果依「廠商-品項-主菜」分組。</p>
+        <p id="monthly-status" class="mt-3 text-center text-xs text-slate-400">每家廠商分別上傳一份菜單，AI 會辨識「每天（或星期一到五）」的餐點與價格。</p>
       </section>
     </div>`;
   const storeInput = $('#monthly-store');
-  $('#monthly-camera').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
-  $('#monthly-upload').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
+  $('#monthly-pdf').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
+  $('#monthly-img').addEventListener('change', (event) => handleMonthlyFile(event, storeInput));
 }
 
 async function handleMonthlyFile(event, storeInput) {
@@ -1818,46 +1821,75 @@ async function handleMonthlyFile(event, storeInput) {
   const storeName = (storeInput?.value || '').trim();
   if (!storeName) return toast('請先輸入廠商名稱。', 'error');
   const statusEl = $('#monthly-status');
-  if (statusEl) statusEl.textContent = '圖片處理中…';
+  if (statusEl) statusEl.textContent = '檔案處理中…';
   try {
-    const { imageBase64, mimeType } = await compressImage(file);
-    if (statusEl) statusEl.textContent = `辨識「${storeName}」菜單中，請稍候…`;
-    const result = await api('aiRecognizeMenu', { imageBase64, mimeType });
-    showVendorPreview(storeName, result.items);
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    let imageBase64; let mimeType;
+    if (isPdf) {
+      imageBase64 = await fileToBase64(file);
+      mimeType = 'application/pdf';
+    } else {
+      ({ imageBase64, mimeType } = await compressImage(file));
+    }
+    if (statusEl) statusEl.textContent = `辨識「${storeName}」每日菜單中，請稍候…`;
+    const result = await api('aiRecognizeMonthlyMenu', { imageBase64, mimeType });
+    showVendorPreview(storeName, result.entries);
   } catch (error) {
     if (statusEl) statusEl.textContent = error.message;
     else toast(error.message, 'error');
   }
 }
 
-function showVendorPreview(storeName, items) {
-  if (!items.length) { toast('沒有辨識到任何品項。', 'error'); closeModal(); return; }
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function showVendorPreview(storeName, entries) {
+  if (!entries.length) { toast('沒有辨識到任何菜單資料。', 'error'); closeModal(); return; }
   state.monthlyStore = storeName;
+  state.monthlyEntries = entries;
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
       <section class="sheet-enter flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
         <div class="flex items-center justify-between border-b border-ledger/10 bg-white px-5 py-4">
-          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">${escapeHtml(storeName)} · 辨識結果</h2></div>
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">${escapeHtml(storeName)} · ${entries.length} 天</h2></div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
-        <div class="flex-1 overflow-y-auto px-4 py-3" id="ai-list"></div>
+        <div class="flex-1 overflow-y-auto px-4 py-3" id="monthly-list"></div>
         <div class="border-t border-ledger/10 bg-white px-5 py-4">
-          <button data-action="save-vendor-items" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認寫入（${items.length} 項）</button>
+          <button data-action="save-vendor-items" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認匯入（${entries.length} 天）</button>
         </div>
       </section>
     </div>`;
-  state.aiItems = items.map((item) => ({ ...item }));
-  renderAiList();
+  renderMonthlyList();
+}
+
+function renderMonthlyList() {
+  const listEl = $('#monthly-list');
+  if (!listEl) return;
+  listEl.innerHTML = state.monthlyEntries.length ? state.monthlyEntries.map((entry, index) => `
+    <div class="mb-2 flex items-start justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-ledger/5">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-ledger">${escapeHtml(entry.date)}</p>
+        <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(entry.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
+      </div>
+      <button data-action="del-monthly-entry" data-index="${index}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
+    </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">沒有辨識到任何資料。</p>';
 }
 
 async function saveVendorItems() {
   const storeName = state.monthlyStore || '';
-  const items = state.aiItems.filter((item) => item.name.trim());
+  const entries = state.monthlyEntries || [];
   try {
     await busy(async () => {
-      const result = await api('adminImportVendorMenu', { storeName, items });
+      const result = await api('adminImportVendorMenu', { storeName, entries });
       closeModal();
-      toast(`已加入「${result.storeName}」：${result.created} 個新品項。`, 'success');
+      toast(`已匯入「${result.storeName}」：${result.createdItems} 個品項、${result.createdSessions} 個場次。`, 'success');
       await refreshAdmin();
     });
   } catch (error) {

@@ -14,15 +14,16 @@ const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上�
 5. 忽略照片中的標語、電話、地址等非菜單內容。
 6. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
 
-const MONTHLY_PROMPT = `你是學校「每月菜單」文字辨識助手。請辨識這張每月菜單照片，找出「每一天」的日期、供應廠商（店家名稱），以及當天提供的品項與價格。
+const MONTHLY_PROMPT = `你是學校「每月菜單」文字辨識助手。請辨識這份菜單，找出「每一天」（或星期一到五）提供的餐點與價格。
 規則：
 1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
-2. 每一天（或每一天的每個店家）是一個物件，格式為：
-   {"date":"YYYY-MM-DD","store":"店家名稱","items":[{"name":"品項名稱","price":數字,"options":["選項"]}]}
-3. date 使用西元格式 YYYY-MM-DD。若照片只標「月份＋日期」而無年份，請以「最近的未來」補上合理年份。
-4. price 必須是數字（新台幣元），無法辨識時填 0；options 是客製選項字串陣列，沒有則為空陣列 []。
-5. 若同一天有多個店家，請拆成多筆（同一天可重複出現，store 不同）。
-6. 忽略標語、電話、地址等非菜單內容；若完全沒有辨識到任何資料，輸出空陣列 []。`;
+2. 每一天是一個物件，格式為：
+   {"date":"YYYY-MM-DD","items":[{"name":"餐點名稱","price":數字,"options":["選項"]}]}
+3. date 用西元 YYYY-MM-DD。若菜單只有「星期」而無日期（如「星期一 香酥雞排」），表示每週都一樣，請把當月份每個該星期都展開成具體日期。
+4. 若菜單是「日期區間」（如 8/31-9/4），請把區間內每個上學日都展開成具體日期。
+5. 若有多種價位/編號（如 1號/2號/3號、A餐/B餐、100元/85元/75元），items 要分開列出，名稱帶上編號或餐名（如「1號 池上」）。
+6. price 必須是數字（新台幣元），無法辨識時填 0；options 是客製選項字串陣列，沒有則為空陣列 []。
+7. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
 
 function normalizeItems(parsed) {
   const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
@@ -41,7 +42,6 @@ function normalizeMonthly(parsed) {
   return list
     .map((entry) => ({
       date: String(entry?.date || '').trim(),
-      store: String(entry?.store || '').trim(),
       items: (Array.isArray(entry?.items) ? entry.items : [])
         .map((item) => ({
           name: String(item?.name || '').trim(),
@@ -51,8 +51,8 @@ function normalizeMonthly(parsed) {
         .filter((item) => item.name)
         .slice(0, 50),
     }))
-    .filter((entry) => entry.date && entry.store && entry.items.length)
-    .slice(0, 120);
+    .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.date) && entry.items.length)
+    .slice(0, 200);
 }
 
 async function geminiParse(imageBase64, mimeType, prompt) {
@@ -104,10 +104,10 @@ async function openaiParse(imageBase64, mimeType, prompt) {
 }
 
 function validateImage(data) {
-  const imageBase64 = String(data.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
+  const imageBase64 = String(data.imageBase64 || '').replace(/^data:[^;]+;base64,/, '');
   const mimeType = String(data.mimeType || 'image/jpeg');
-  if (!imageBase64) throw appError('INVALID_INPUT', '請先上傳菜單照片。');
-  if (imageBase64.length > 8 * 1024 * 1024) throw appError('INVALID_INPUT', '圖片過大，請壓縮後再試。');
+  if (!imageBase64) throw appError('INVALID_INPUT', '請先上傳菜單照片或 PDF。');
+  if (imageBase64.length > 8 * 1024 * 1024) throw appError('INVALID_INPUT', '檔案過大，請縮小後再試。');
   return { imageBase64, mimeType };
 }
 

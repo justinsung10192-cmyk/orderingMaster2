@@ -91,12 +91,21 @@ create table if not exists public.menu_items (
   name       text not null,
   price      numeric(10,2) not null default 0,
   options    jsonb not null default '[]',   -- [{"name":"加珍珠","price":5}, ...]
+  menu_date  date not null default '1970-01-01',  -- 特定日期專屬菜單；'1970-01-01'=每天都有
   is_active  boolean not null default true,
   sort_order int not null default 0,
   created_at timestamptz not null default now(),
-  unique (class_id, store_id, name)
+  unique (class_id, store_id, name, menu_date)
 );
 create index if not exists idx_menu_items_store on public.menu_items (store_id);
+-- 既有資料庫升級：補 menu_date 欄位，並把唯一鍵改成含 menu_date（支援每天不同菜單）
+alter table public.menu_items add column if not exists menu_date date not null default '1970-01-01';
+alter table public.menu_items drop constraint if exists menu_items_class_id_store_id_name_key;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'menu_items_class_id_store_id_name_menu_date_key') then
+    alter table public.menu_items add constraint menu_items_class_id_store_id_name_menu_date_key unique (class_id, store_id, name, menu_date);
+  end if;
+end $$;
 
 -- 每日固定店家（固定菜單：每天都有場次，放假除外）--------------------------------
 create table if not exists public.recurring_menu (
@@ -311,7 +320,7 @@ from public.stores s,
        ('五十嵐', '珍珠奶茶', 55, '[{"name":"無糖","price":0},{"name":"微糖","price":0},{"name":"半糖","price":0},{"name":"加布丁","price":15}]', 1)
      ) as v(store_name, name, price, options, sort_order)
 where s.class_id = 'demo' and s.name = v.store_name
-on conflict (class_id, store_id, name) do nothing;
+on conflict (class_id, store_id, name, menu_date) do nothing;
 
 -- ============================================================================
 -- 金流原子運算（由 API 以 supabase.rpc 呼叫，避免並發扣款錯誤）

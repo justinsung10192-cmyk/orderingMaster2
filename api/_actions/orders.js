@@ -10,7 +10,9 @@ async function loadOrderContext(data, ctx) {
   if (new Date(session.cutoff_time).getTime() < Date.now()) {
     throw appError('CUTOFF_PASSED', '已超過截止時間，無法修改訂單。');
   }
-  const menuItems = (await listMenuItemsForStore(ctx.classId, session.store_id, { includeInactive: false })).map((item) => ({
+  const menuItems = (await listMenuItemsForStore(ctx.classId, session.store_id, { includeInactive: false }))
+    .filter((item) => !item.menu_date || item.menu_date === '1970-01-01' || item.menu_date === session.order_date)
+    .map((item) => ({
     itemId: sid(item.id),
     name: item.name,
     price: num(item.price),

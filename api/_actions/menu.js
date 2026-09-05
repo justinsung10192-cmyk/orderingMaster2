@@ -32,6 +32,7 @@ export const actions = {
         itemId: sid(item.id),
         name: item.name,
         price: num(item.price),
+        menuDate: item.menu_date || '',
         options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
           name: option.name,
           price: num(option.price),
@@ -151,7 +152,7 @@ export const actions = {
         for (const item of entry.items) {
           const name = String(item?.name || '').trim();
           if (!name) continue;
-          const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options));
+          const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options), date);
           if (itemResult.created) items += 1;
         }
       }
@@ -161,22 +162,32 @@ export const actions = {
     return { ok: true, stores, items, sessions };
   },
 
-  // 匯入廠商菜單（每月更新）：依「廠商名稱」建立/更新店家與品項
+  // 匯入廠商每月菜單：依「廠商名稱」建立/更新店家、日期專屬品項與每天場次
   async adminImportVendorMenu(data, ctx) {
     const storeName = String(data.storeName || '').trim();
     if (!storeName) throw appError('INVALID_INPUT', '請輸入廠商名稱。');
-    const items = Array.isArray(data.items) ? data.items : [];
-    if (!items.length) throw appError('INVALID_INPUT', '沒有可匯入的品項。');
-    if (items.length > 100) throw appError('INVALID_INPUT', '單次最多匯入 100 個品項。');
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (!entries.length) throw appError('INVALID_INPUT', '沒有可匯入的菜單資料。');
+    if (entries.length > 200) throw appError('INVALID_INPUT', '單次最多匯入 200 天。');
+
     const storeResult = await findOrCreateStore(ctx.classId, storeName);
-    let created = 0;
-    for (const item of items) {
-      const name = String(item?.name || '').trim();
-      if (!name) continue;
-      const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options));
-      if (itemResult.created) created += 1;
+    let createdItems = 0;
+    let createdSessions = 0;
+    for (const entry of entries) {
+      const date = String(entry?.date || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const items = Array.isArray(entry?.items) ? entry.items : [];
+      if (!items.length) continue;
+      for (const item of items) {
+        const name = String(item?.name || '').trim();
+        if (!name) continue;
+        const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options), date);
+        if (itemResult.created) createdItems += 1;
+      }
+      const sessionResult = await findOrCreateSession(ctx.classId, storeResult.store.id, date);
+      if (sessionResult.created) createdSessions += 1;
     }
-    return { ok: true, storeId: sid(storeResult.store.id), storeName: storeResult.store.name, created };
+    return { ok: true, storeId: sid(storeResult.store.id), storeName: storeResult.store.name, createdItems, createdSessions };
   },
 };
 
@@ -187,13 +198,13 @@ async function findOrCreateStore(classId, name) {
   return { store: await insertRow('stores', { class_id: classId, name, sort_order: 0 }), created: true };
 }
 
-async function findOrCreateMenuItem(classId, storeId, name, price, options) {
-  const existing = await findOne('menu_items', { store_id: storeId, name }, classId);
+async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01') {
+  const existing = await findOne('menu_items', { store_id: storeId, name, menu_date: menuDate }, classId);
   if (existing) return { item: existing, created: false };
-  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, sort_order: 0 }), created: true };
+  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, menu_date: menuDate, sort_order: 0 }), created: true };
 }
 
-async function findOrCreateSession(classId, storeId, date, cutoffTime) {
+async function findOrCreateSession(classId, storeId, date, cutoffTime = '09:30') {
   const existing = await findOne('sessions', { store_id: storeId, order_date: date }, classId);
   if (existing) return { session: existing, created: false }; // 含已刪除，尊重管理者手動刪除
   const cutoff = new Date(`${date}T${cutoffTime}:00`);
