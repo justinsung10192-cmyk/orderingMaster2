@@ -1,4 +1,0 @@
-套用上傳圖標：以 1080x1080 來源圖縮放產生 PWA 各尺寸圖標
-
-- 以使用者上傳的 1080x1080 圖檔，縮放產生 icon-192/512、apple-touch-icon(180)、favicon
-- 移除 repo 根目錄重複的上傳圖檔（icon-192/512、apple-touch-icon）
