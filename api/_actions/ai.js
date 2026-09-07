@@ -59,24 +59,59 @@ function normalizeMonthly(parsed) {
     .slice(0, 200);
 }
 
+// 將模型回傳文字（可能夾雜 Markdown code fence 或前後雜訊）穩健解析為 JSON
+function extractJson(text) {
+  let t = String(text || '').trim();
+  t = t.replace(/^```(?:json|JSON)?\s*/g, '').replace(/\s*```$/g, '');
+  try { return JSON.parse(t); } catch (_) { /* 繼續嘗試擷取子字串 */ }
+  const match = t.match(/[\[{][\s\S]*[\]}]/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch (_) { /* 最後才拋錯 */ }
+  }
+  throw new Error('AI 回傳內容無法解析為 JSON');
+}
+
+function geminiError(status, message) {
+  const m = String(message || '').trim();
+  if (status === 401 || status === 403) return 'GEMINI_API_KEY 無效或無權限，請檢查金鑰是否正確。';
+  if (status === 404) return `找不到模型（${m || '404'}），請檢查 GEMINI_MODEL 設定。`;
+  if (status === 429) return 'Gemini API 配額已用盡或請求過於頻繁（429），請稍後再試或檢查方案與帳單。';
+  if (status === 503 || status >= 500) return 'Gemini API 暫時過載，請稍後再試。';
+  return `Gemini API 錯誤 (${status})：${m}`;
+}
+
 async function geminiParse(imageBase64, mimeType, prompt) {
   const apiKey = process.env.GEMINI_API_KEY || '';
-  // 預設 gemini-3.7-flash（gemini-1.5 / 2.0 / 2.5 均已停用），可透過 GEMINI_MODEL 覆寫
-  const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
+  // 預設 gemini-3.8-flash（目前最新穩定版；舊版 gemini-1.5 / 2.0 / 2.5 / 3.7 已停用或常過載），可透過 GEMINI_MODEL 覆寫
+  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
     generationConfig: { response_mime_type: 'application/json' },
   };
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`Gemini API 錯誤 (${res.status})`);
-  const json = await res.json();
-  const text = json?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
-  return JSON.parse(text);
+  let lastStatus = 0;
+  let lastMessage = '';
+  // 過載(503)/限流(429)/5xx 為暫時性錯誤，最多重試 2 次（退避）
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const text = json?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+      return extractJson(text);
+    }
+    lastStatus = res.status;
+    try { const errJson = await res.json(); lastMessage = errJson?.error?.message || ''; } catch (_) { /* 忽略 */ }
+    if (attempt < 2 && (res.status === 429 || res.status === 503 || res.status >= 500)) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      continue;
+    }
+    break;
+  }
+  throw new Error(geminiError(lastStatus, lastMessage));
 }
 
 async function openaiParse(imageBase64, mimeType, prompt) {
@@ -104,7 +139,7 @@ async function openaiParse(imageBase64, mimeType, prompt) {
   if (!res.ok) throw new Error(`OpenAI API 錯誤 (${res.status})`);
   const json = await res.json();
   const text = json?.choices?.[0]?.message?.content || '';
-  return JSON.parse(text);
+  return extractJson(text);
 }
 
 function validateImage(data) {

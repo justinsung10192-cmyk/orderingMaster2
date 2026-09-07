@@ -38,6 +38,8 @@ const state = {
 
 const ICONS = { order: '⌑', vote: '♡', wallet: '¤', admin: '✓', settings: '☷' };
 
+const APP_VERSION = '3.1.0';
+
 /* ============================ API ============================ */
 async function api(action, data = {}) {
   const res = await fetch(window.LUNCH_CONFIG.apiUrl, {
@@ -243,6 +245,9 @@ function render() {
         </div>
       </header>
       <main id="view" class="mx-auto max-w-3xl px-4 py-5"></main>
+      <footer class="mx-auto max-w-3xl px-4 pb-2 pt-1 text-center text-[11px] leading-5 text-slate-400">
+        班級訂餐管理系統 <span class="font-semibold text-slate-500">v${APP_VERSION}</span>
+      </footer>
       <nav class="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-ledger/10 bg-white/95 px-2 pt-2 backdrop-blur-xl">
         <div class="mx-auto flex max-w-md items-center justify-around">
           ${navItems.map((item) => `
