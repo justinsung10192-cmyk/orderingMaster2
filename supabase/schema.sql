@@ -552,7 +552,7 @@ declare
   v_outstanding numeric;
   v_total_settled numeric := 0;
 begin
-  select wallet_balance from users
+  perform 1 from users
   where id = p_user_id and class_id = p_class_id
   for update;
 
