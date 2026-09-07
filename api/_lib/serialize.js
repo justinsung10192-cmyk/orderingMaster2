@@ -93,7 +93,7 @@ export function computeOrderItems(menuItems, selections) {
     if (unitPrice < 0) throw new Error('餐點金額不正確。');
     return {
       itemId,
-      itemName: item.name,
+      itemName: item.dish ? `${item.name}（${item.dish}）` : item.name,
       quantity,
       unitPrice,
       lineTotal: round2(unitPrice * quantity),
@@ -117,6 +117,7 @@ export async function loadSessionWithMenu(session) {
     menuItems: menuItems.map((item) => ({
       itemId: sid(item.id),
       name: item.name,
+      dish: item.dish || '',
       price: num(item.price),
       options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({
         index,
@@ -187,6 +188,7 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
       .map((item) => ({
         itemId: sid(item.id),
         name: item.name,
+        dish: item.dish || '',
         price: num(item.price),
         options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price) })),
       }));

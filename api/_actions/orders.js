@@ -15,6 +15,7 @@ async function loadOrderContext(data, ctx) {
     .map((item) => ({
     itemId: sid(item.id),
     name: item.name,
+    dish: item.dish || '',
     price: num(item.price),
     options: Array.isArray(item.options) ? item.options : [],
   }));

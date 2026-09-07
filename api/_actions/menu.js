@@ -1,6 +1,6 @@
 // 動作：店家與菜單管理（資料夾式：店家 → 品項 → 客製選項）
 import { appError, sid, num, weekLabelOf, weekdayName } from '../_lib/util.js';
-import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores } from '../_lib/db.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores, supabase } from '../_lib/db.js';
 
 function normalizeOptions(options) {
   if (!Array.isArray(options)) return [];
@@ -33,6 +33,7 @@ export const actions = {
         .map((item) => ({
           itemId: sid(item.id),
           name: item.name,
+          dish: item.dish || '',
           price: num(item.price),
           menuDate: item.menu_date || '',
           options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
@@ -183,7 +184,7 @@ export const actions = {
       for (const item of items) {
         const name = String(item?.name || '').trim();
         if (!name) continue;
-        const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options), date);
+        const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options), date, String(item?.dish || '').trim());
         if (itemResult.created) createdItems += 1;
       }
       const sessionResult = await findOrCreateSession(ctx.classId, storeResult.store.id, date);
@@ -196,8 +197,16 @@ export const actions = {
   async adminGetDailyMenus(data, ctx) {
     const month = String(data.month || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇月份。');
-    const allItems = await listRows('menu_items', { classId: ctx.classId });
-    const datedItems = allItems.filter((item) => item.menu_date && item.menu_date !== '1970-01-01' && item.menu_date.startsWith(month));
+    const [year, mon] = month.split('-').map(Number);
+    const nextMonth = mon === 12 ? `${year + 1}-01` : `${year}-${String(mon + 1).padStart(2, '0')}`;
+    const { data: rangeItems, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('class_id', ctx.classId)
+      .gte('menu_date', `${month}-01`)
+      .lt('menu_date', `${nextMonth}-01`);
+    if (error) throw appError('DB_ERROR', error.message);
+    const datedItems = (rangeItems || []).filter((item) => item.menu_date !== '1970-01-01');
     const storeIds = [...new Set(datedItems.map((item) => item.store_id))];
     const stores = storeIds.length ? await listRowsIn('stores', 'id', storeIds, { classId: ctx.classId }) : [];
     const storeById = new Map(stores.map((store) => [String(store.id), store]));
@@ -218,7 +227,7 @@ export const actions = {
         vendors: [...byStore.entries()].map(([storeIdStr, storeItems]) => ({
           storeId: storeIdStr,
           storeName: storeById.get(storeIdStr)?.name || '未命名店家',
-          items: storeItems.map((item) => ({ itemId: sid(item.id), name: item.name, price: num(item.price) })),
+          items: storeItems.map((item) => ({ itemId: sid(item.id), name: item.name, dish: item.dish || '', price: num(item.price) })),
         })),
       };
     });
@@ -247,10 +256,13 @@ async function findOrCreateStore(classId, name) {
   return { store: await insertRow('stores', { class_id: classId, name, sort_order: 0 }), created: true };
 }
 
-async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01') {
+async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01', dish = '') {
   const existing = await findOne('menu_items', { store_id: storeId, name, menu_date: menuDate }, classId);
-  if (existing) return { item: existing, created: false };
-  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, menu_date: menuDate, sort_order: 0 }), created: true };
+  if (existing) {
+    if (dish && existing.dish !== dish) await updateRows('menu_items', { id: existing.id }, { dish });
+    return { item: existing, created: false };
+  }
+  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, menu_date: menuDate, dish, sort_order: 0 }), created: true };
 }
 
 async function findOrCreateSession(classId, storeId, date, cutoffTime = '09:30') {

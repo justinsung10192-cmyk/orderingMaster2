@@ -1,6 +1,6 @@
 // 動作：管理員儀表板、帳號管理（含管理者安全防呆）、系統設定、匯總、催繳
 import { appError, sid, num, round2, todayString, weekdayName, monthDay, mondayOf } from '../_lib/util.js';
-import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass } from '../_lib/db.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase } from '../_lib/db.js';
 import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
 import { dashboardOrderRow, outstandingOf, publicUser, orderItems } from '../_lib/serialize.js';
 
@@ -94,11 +94,18 @@ export const actions = {
     const date = String(data.date || todayString());
     const summary = await loadDaySummary(ctx.classId, date);
     const monday = mondayOf();
-    const allOrders = await listRows('orders', { classId: ctx.classId });
-    const activeOrders = allOrders.filter((order) => !order.is_deleted);
+    // 效能優化：只載入「未結清」訂單（避免全表掃描已結清歷史）
+    const { data: unpaidRows, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('class_id', ctx.classId)
+      .eq('is_deleted', false)
+      .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
+    if (error) throw appError('DB_ERROR', error.message);
+    const activeOrders = unpaidRows || [];
     const overdueUserIds = new Set(
       activeOrders
-        .filter((order) => order.order_date < monday && outstandingOf(order) > 0)
+        .filter((order) => order.order_date < monday)
         .map((order) => order.user_id),
     );
 

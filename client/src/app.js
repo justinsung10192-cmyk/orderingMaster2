@@ -483,7 +483,7 @@ function renderMenuItem(item) {
     <div class="mb-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-ledger/5">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <p class="font-bold text-ledger">${escapeHtml(item.name)}</p>
+          <p class="font-bold text-ledger">${escapeHtml(item.name)}${item.dish ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-600">${escapeHtml(item.dish)}</span>` : ''}</p>
           <p class="mt-0.5 text-sm font-bold tabular-nums text-stamp">${fmtMoney(Number(item.price) + optionTotal)}</p>
           ${item.options.length ? `<p class="mt-0.5 truncate text-xs text-slate-400">${item.options.map((option) => option.name).join('、')}</p>` : ''}
         </div>
@@ -947,7 +947,7 @@ async function renderAdminDailyMenu(content) {
                 <div class="flex items-start justify-between rounded-lg bg-mist/50 px-3 py-2">
                   <div class="min-w-0">
                     <p class="text-sm font-bold text-ledger">${escapeHtml(vendor.storeName)}</p>
-                    <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(vendor.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
+                    <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(vendor.items.map((it) => `${it.name}${it.dish ? `（${it.dish}）` : ''} $${money(it.price)}`).join('、'))}</p>
                   </div>
                   <button data-action="del-daily" data-date="${day.date}" data-store="${vendor.storeId}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
                 </div>`).join('')}

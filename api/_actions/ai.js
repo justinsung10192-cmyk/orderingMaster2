@@ -20,12 +20,13 @@ function monthlyPrompt(month) {
 規則：
 1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
 2. 每一天是一個物件，格式為：
-   {"date":"YYYY-MM-DD","items":[{"name":"餐點名稱","price":數字,"options":["選項"]}]}
+   {"date":"YYYY-MM-DD","items":[{"name":"便當種類","price":數字,"dish":"當天菜色"}]}
 3. date 的年份一定是 ${year} 年。若菜單只有「星期」而無日期（如「星期一 香酥雞排」），表示每週都一樣，請把 ${year} 年 ${Number(mon)} 月的每個該星期都展開成具體日期。
 4. 若菜單是「日期區間」（如 8/31-9/4），請把區間內每個上學日都展開成具體日期（年份 ${year}）。
-5. 若有多種價位/編號（如 1號/2號/3號、A餐/B餐、100元/85元/75元），items 要分開列出，名稱帶上編號或餐名（如「1號 池上」）。
-6. price 必須是數字（新台幣元），無法辨識時填 0；options 是客製選項字串陣列，沒有則為空陣列 []。
-7. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
+5. name 是「便當種類」的固定名稱（如「1號便當」「2號便當」「A餐」「B餐」「100元套餐」），不含每天變動的主菜。
+6. dish 是「當天菜色」（主菜名稱，如「池上」「香酥雞腿」「排骨」），每天不同就每天列出；沒有主菜資訊時填空字串 ""。
+7. price 必須是數字（新台幣元），無法辨識時填 0。
+8. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
 }
 
 function normalizeItems(parsed) {
@@ -49,7 +50,7 @@ function normalizeMonthly(parsed) {
         .map((item) => ({
           name: String(item?.name || '').trim(),
           price: num(item?.price),
-          options: (Array.isArray(item?.options) ? item.options : []).map((option) => String(option).trim()).filter(Boolean).slice(0, 30),
+          dish: String(item?.dish || '').trim(),
         }))
         .filter((item) => item.name)
         .slice(0, 50),
