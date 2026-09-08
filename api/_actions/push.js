@@ -27,10 +27,10 @@ export const actions = {
     return { ok: true };
   },
 
-  async pushUnsubscribe(data) {
+  async pushUnsubscribe(data, ctx) {
     const endpoint = String(data.endpoint || '').trim();
     if (endpoint) {
-      await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint).eq('user_id', ctx.user.id);
     }
     return { ok: true };
   },

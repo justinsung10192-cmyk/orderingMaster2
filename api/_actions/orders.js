@@ -91,7 +91,6 @@ export const actions = {
       p_wallet_paid: walletPaid,
       p_cash_outstanding: cashOutstanding,
       p_pure_mode: pureMode,
-      p_prior_paid: num(existing.prior_paid),
       p_order_id: existing.id,
       p_items: JSON.stringify(computed.items),
       p_note: note,

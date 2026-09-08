@@ -177,6 +177,36 @@ export const actions = {
     }
     return { ok: true };
   },
+
+  // 一鍵清除：取消所有每日固定店家，並刪除其「今天起」的預排場次（已付款訂單自動退款）
+  async adminClearRecurring(_data, ctx) {
+    const recurring = await listRows('recurring_menu', { classId: ctx.classId, filters: { is_active: true } });
+    if (!recurring.length) throw appError('INVALID_INPUT', '目前沒有啟用中的固定店家。');
+    const storeIds = [...new Set(recurring.map((row) => row.store_id))];
+    const today = todayString();
+
+    // 找出這些店家「今天含以後」且未刪除的場次（含已公布與草稿）
+    const sessions = await listRowsIn('sessions', 'store_id', storeIds, { classId: ctx.classId });
+    const futureSessions = sessions.filter((session) => !session.is_deleted && session.order_date >= today);
+
+    let deletedSessions = 0;
+    let refundedOrders = 0;
+    for (const session of futureSessions) {
+      const result = await callRpc('fn_delete_session_and_refund', {
+        p_class_id: ctx.classId,
+        p_session_id: session.id,
+      });
+      deletedSessions += 1;
+      refundedOrders += Number(result?.refunded_count || 0);
+    }
+
+    // 停用所有固定店家設定，避免日後再自動產生場次
+    for (const row of recurring) {
+      await updateRows('recurring_menu', { id: row.id }, { is_active: false });
+    }
+
+    return { ok: true, clearedRecurring: recurring.length, deletedSessions, refundedOrders };
+  },
 };
 
 // 將固定店家展開成未來 N 天的場次（放假除外；已有場次的日期不重複建立）

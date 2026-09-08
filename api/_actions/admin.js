@@ -202,6 +202,8 @@ export const actions = {
       must_change_password: true,
       updated_at: new Date().toISOString(),
     });
+    // 使該同學現有的登入 Token 全部失效
+    await deleteRows('auth_tokens', { user_id: target.id });
     return { ok: true, message: '已重設為預設密碼，該同學下次登入需重新設定。' };
   },
 

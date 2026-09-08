@@ -65,6 +65,7 @@ const ADMIN = new Set([
   'adminResetAllData',
   'adminResolveSeat',
   'adminSaveRecurring',
+  'adminClearRecurring',
   'aiRecognizeMenu',
   'aiRecognizeMonthlyMenu',
   'adminImportMonthlyMenu',

@@ -348,7 +348,7 @@ declare
   v_balance numeric;
   v_status text;
   v_order_id bigint;
-  v_owned bigint;
+  v_prior_paid numeric := 0;
 begin
   select wallet_balance into v_balance
   from users where id = p_user_id and class_id = p_class_id
@@ -357,18 +357,29 @@ begin
     raise exception 'USER_NOT_FOUND';
   end if;
 
+  -- 更新訂單時：鎖定訂單列並讀取「資料庫內」的 prior_paid（不信任呼叫端傳值），
+  -- 避免並發修改造成重複退款（TOCTOU）。新增時 v_prior_paid 保持 0。
+  if p_order_id is not null then
+    select prior_paid into v_prior_paid from orders
+    where id = p_order_id and user_id = p_user_id and class_id = p_class_id
+    for update;
+    if v_prior_paid is null then
+      raise exception 'ORDER_NOT_FOUND';
+    end if;
+  end if;
+
   -- 純儲值模式：錢包必須足以支付全額，禁止現金欠款
   if p_pure_mode then
     if p_cash_outstanding > 0 then
       raise exception 'PURE_MODE_NO_CASH';
     end if;
-    if v_balance + coalesce(p_prior_paid, 0) < p_wallet_paid then
+    if v_balance + v_prior_paid < p_wallet_paid then
       raise exception 'INSUFFICIENT_BALANCE';
     end if;
   end if;
 
-  -- 更新訂單時：先退回原單已付金額，再重新結算
-  v_balance := v_balance + coalesce(p_prior_paid, 0);
+  -- 退回原單實際已付金額，再重新結算
+  v_balance := v_balance + v_prior_paid;
 
   if p_wallet_paid > 0 then
     if v_balance < p_wallet_paid then
@@ -389,11 +400,6 @@ begin
   end if;
 
   if p_order_id is not null then
-    select id into v_owned from orders
-    where id = p_order_id and user_id = p_user_id and class_id = p_class_id;
-    if v_owned is null then
-      raise exception 'ORDER_NOT_FOUND';
-    end if;
     update orders
        set items = p_items, total_price = p_total, prior_paid = p_wallet_paid,
            payment_status = v_status, note = p_note, updated_at = now()
@@ -405,9 +411,9 @@ begin
     returning id into v_order_id;
   end if;
 
-  if p_prior_paid > 0 then
+  if v_prior_paid > 0 then
     insert into transactions (class_id, user_id, order_id, amount, kind, note)
-    values (p_class_id, p_user_id, v_order_id, p_prior_paid, 'Refund', '訂單修改退款');
+    values (p_class_id, p_user_id, v_order_id, v_prior_paid, 'Refund', '訂單修改退款');
   end if;
   if p_wallet_paid > 0 then
     insert into transactions (class_id, user_id, order_id, amount, kind, note)

@@ -669,7 +669,7 @@ async function loadWalletDetail() {
 
     txsEl.innerHTML = data.transactions.length ? data.transactions.map((tx) => `
       <div class="flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-ledger/5">
-        <div><p class="text-sm font-bold text-ledger">${escapeHtml(tx.type)}</p><p class="text-xs text-slate-400">${tx.note || new Date(tx.timestamp).toLocaleString('zh-TW')}</p></div>
+        <div><p class="text-sm font-bold text-ledger">${escapeHtml(tx.type)}</p><p class="text-xs text-slate-400">${escapeHtml(tx.note) || new Date(tx.timestamp).toLocaleString('zh-TW')}</p></div>
         <span class="font-bold tabular-nums ${Number(tx.amount) >= 0 ? 'text-stamp' : 'text-red-600'}">${Number(tx.amount) >= 0 ? '+' : ''}${money(tx.amount)}</span>
       </div>`).join('') : '<p class="rounded-xl bg-white/60 px-4 py-8 text-center text-sm text-slate-400">尚無交易紀錄。</p>';
   } catch (error) {
@@ -1029,7 +1029,10 @@ async function renderAdminSchedule(content) {
               <p class="text-[11px] font-bold tracking-[.13em] text-stamp">RECURRING</p>
               <h2 class="font-serif text-xl font-black">每日固定店家</h2>
             </div>
-            <button data-action="add-recurring" class="rounded-xl bg-ledger px-3 py-2 text-xs font-bold text-white">＋ 固定店家</button>
+            <div class="flex items-center gap-2">
+              ${data.recurring.length ? '<button data-action="clear-recurring" class="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">一鍵清除</button>' : ''}
+              <button data-action="add-recurring" class="rounded-xl bg-ledger px-3 py-2 text-xs font-bold text-white">＋ 固定店家</button>
+            </div>
           </div>
           <p class="mt-1 text-xs text-slate-400">設為固定的店家每天都會有場次（放假除外），學生可直接訂餐。</p>
           <div class="mt-3 space-y-2">
@@ -1645,6 +1648,11 @@ async function handleAction(action, target) {
       break;
     }
     case 'del-recurring': openConfirm('取消固定店家', '取消後將不再自動產生新場次（已產生的場次保留）。', async () => { await api('adminSaveRecurring', { storeId: target.getAttribute('data-store'), enabled: false }); toast('已取消固定。', 'success'); await refreshAdmin(); }); break;
+    case 'clear-recurring': openConfirm('一鍵清除固定店家', '將取消所有固定店家設定，並刪除其「今天起」的預排場次（已付款訂單會自動退款）。確定嗎？', async () => {
+      const r = await api('adminClearRecurring');
+      toast(`已取消 ${r.clearedRecurring} 個固定店家、刪除 ${r.deletedSessions} 個預排場次${r.refundedOrders ? `（退款 ${r.refundedOrders} 筆訂單）` : ''}。`, 'success');
+      await refreshAdmin();
+    }); break;
 
     // 管理員 - 核銷
     case 'open-scanner': openScanner(); break;

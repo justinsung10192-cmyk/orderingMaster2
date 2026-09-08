@@ -80,38 +80,53 @@ function geminiError(status, message) {
   return `Gemini API 錯誤 (${status})：${m}`;
 }
 
+// 預設模型備援鏈：穩定版優先（gemini-3.6/3.5 實測穩定；3.8/3.7 最新但常回 503 過載）
+const GEMINI_MODEL_CHAIN = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash'];
+
+function geminiModels() {
+  const custom = String(process.env.GEMINI_MODEL || '').trim();
+  if (!custom) return GEMINI_MODEL_CHAIN;
+  return [custom, ...GEMINI_MODEL_CHAIN.filter((model) => model !== custom)];
+}
+
 async function geminiParse(imageBase64, mimeType, prompt) {
   const apiKey = process.env.GEMINI_API_KEY || '';
-  // 預設 gemini-3.8-flash（目前最新穩定版；舊版 gemini-1.5 / 2.0 / 2.5 / 3.7 已停用或常過載），可透過 GEMINI_MODEL 覆寫
-  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const body = {
-    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
-    generationConfig: { response_mime_type: 'application/json' },
-  };
-  let lastStatus = 0;
-  let lastMessage = '';
-  // 過載(503)/限流(429)/5xx 為暫時性錯誤，最多重試 2 次（退避）
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const text = json?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
-      return extractJson(text);
+  const models = geminiModels();
+  let lastError = '';
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const body = {
+      contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
+      generationConfig: { response_mime_type: 'application/json' },
+    };
+    // 過載(503)/限流(429)/5xx 為暫時性錯誤：每個模型最多重試 2 次（退避），再換下一個模型
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const text = json?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+        return extractJson(text);
+      }
+      let message = '';
+      try { const errJson = await res.json(); message = errJson?.error?.message || ''; } catch (_) { /* 忽略 */ }
+      // 金鑰錯誤：換模型也沒用，直接拋出
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(geminiError(res.status, message));
+      }
+      if ((res.status === 429 || res.status === 503 || res.status >= 500) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      lastError = geminiError(res.status, message);
+      break;
     }
-    lastStatus = res.status;
-    try { const errJson = await res.json(); lastMessage = errJson?.error?.message || ''; } catch (_) { /* 忽略 */ }
-    if (attempt < 2 && (res.status === 429 || res.status === 503 || res.status >= 500)) {
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-      continue;
-    }
-    break;
   }
-  throw new Error(geminiError(lastStatus, lastMessage));
+  throw new Error(lastError || 'Gemini API 暫時無法使用，請稍後再試。');
 }
 
 async function openaiParse(imageBase64, mimeType, prompt) {

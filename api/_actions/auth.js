@@ -36,10 +36,11 @@ export const actions = {
     return { token, user: publicUser(user) };
   },
 
-  // 首次登入：強制設定姓名與新密碼
+  // 首次登入：強制設定姓名與新密碼（僅在 must_change_password 狀態下允許，避免繞過「改密碼需舊密碼」）
   async completeSetup(data, ctx) {
     const studentName = String(data.studentName || '').trim();
     const password = String(data.password || '');
+    if (!ctx.user.must_change_password) throw appError('FORBIDDEN', '請使用「修改密碼」功能，並輸入目前密碼。');
     if (!studentName) throw appError('INVALID_INPUT', '請填寫你的姓名。');
     if (!password || password.length < 8) throw appError('WEAK_PASSWORD', '密碼至少須為 8 個字元。');
 
