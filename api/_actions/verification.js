@@ -84,7 +84,7 @@ export const actions = {
     }
     if (new Date(payload.exp).getTime() < Date.now()) throw appError('EXPIRED', 'QR Code 已失效，請學生重新產生。');
 
-    const record = await findOne('verification_records', { payload: JSON.stringify(payload) });
+    const record = await findOne('verification_records', { payload: JSON.stringify(payload) }, ctx.classId);
     if (!record || record.status !== 'Pending') throw appError('EXPIRED', '此憑證已使用或已失效。');
     if (new Date(record.expires_at).getTime() < Date.now()) throw appError('EXPIRED', 'QR Code 已過期，請學生重新產生。');
 
