@@ -1492,6 +1492,8 @@ function closeModal() {
 async function refreshBoot() {
   state.boot = await api('getBootstrap');
   state.user = state.boot.user;
+  const el = $('#header-wallet');
+  if (el) el.textContent = fmtMoney(state.user.walletBalance);
 }
 
 async function withAdminRefresh(fn) {

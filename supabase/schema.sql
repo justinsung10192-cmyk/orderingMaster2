@@ -161,7 +161,8 @@ create table if not exists public.orders (
   user_id        bigint references public.users(id) on delete set null,
   items          jsonb not null default '[]',
   total_price    numeric(10,2) not null default 0,
-  prior_paid     numeric(10,2) not null default 0,         -- 已由儲值金支付
+  prior_paid     numeric(10,2) not null default 0,         -- 已支付總額（錢包+現金）
+  wallet_paid    numeric(10,2) not null default 0,         -- 其中由儲值金支付（退款以此為準）
   payment_status text not null default 'UnpaidCash',
   is_deleted     boolean not null default false,
   pickup_status  text not null default 'Pending',
@@ -172,6 +173,10 @@ create table if not exists public.orders (
 );
 create index if not exists idx_orders_session on public.orders (session_id);
 create index if not exists idx_orders_user on public.orders (user_id);
+
+-- 既有資料庫升級：補上 wallet_paid 欄位（歷史資料以 prior_paid 近似）
+alter table public.orders add column if not exists wallet_paid numeric(10,2) not null default 0;
+update public.orders set wallet_paid = prior_paid where wallet_paid = 0 and prior_paid > 0;
 
 -- 交易帳目 ------------------------------------------------------------------
 create table if not exists public.transactions (
@@ -350,7 +355,7 @@ declare
   v_balance numeric;
   v_status text;
   v_order_id bigint;
-  v_prior_paid numeric := 0;
+  v_wallet_paid numeric := 0;
 begin
   select wallet_balance into v_balance
   from users where id = p_user_id and class_id = p_class_id
@@ -359,13 +364,12 @@ begin
     raise exception 'USER_NOT_FOUND';
   end if;
 
-  -- 更新訂單時：鎖定訂單列並讀取「資料庫內」的 prior_paid（不信任呼叫端傳值），
-  -- 避免並發修改造成重複退款（TOCTOU）。新增時 v_prior_paid 保持 0。
+  -- 更新訂單：鎖定訂單列並讀取「資料庫內」的 wallet_paid（只退錢包已付，不把現金算入退款）
   if p_order_id is not null then
-    select prior_paid into v_prior_paid from orders
+    select wallet_paid into v_wallet_paid from orders
     where id = p_order_id and user_id = p_user_id and class_id = p_class_id
     for update;
-    if v_prior_paid is null then
+    if v_wallet_paid is null then
       raise exception 'ORDER_NOT_FOUND';
     end if;
   end if;
@@ -375,13 +379,13 @@ begin
     if p_cash_outstanding > 0 then
       raise exception 'PURE_MODE_NO_CASH';
     end if;
-    if v_balance + v_prior_paid < p_wallet_paid then
+    if v_balance + v_wallet_paid < p_wallet_paid then
       raise exception 'INSUFFICIENT_BALANCE';
     end if;
   end if;
 
-  -- 退回原單實際已付金額，再重新結算
-  v_balance := v_balance + v_prior_paid;
+  -- 退回舊單的錢包已付金額，再重新扣款
+  v_balance := v_balance + v_wallet_paid;
 
   if p_wallet_paid > 0 then
     if v_balance < p_wallet_paid then
@@ -403,19 +407,19 @@ begin
 
   if p_order_id is not null then
     update orders
-       set items = p_items, total_price = p_total, prior_paid = p_wallet_paid,
+       set items = p_items, total_price = p_total, prior_paid = p_wallet_paid, wallet_paid = p_wallet_paid,
            payment_status = v_status, note = p_note, updated_at = now()
      where id = p_order_id
     returning id into v_order_id;
   else
-    insert into orders (class_id, session_id, user_id, items, total_price, prior_paid, payment_status, pickup_status, note)
-    values (p_class_id, p_session_id, p_user_id, p_items, p_total, p_wallet_paid, v_status, 'Pending', p_note)
+    insert into orders (class_id, session_id, user_id, items, total_price, prior_paid, wallet_paid, payment_status, pickup_status, note)
+    values (p_class_id, p_session_id, p_user_id, p_items, p_total, p_wallet_paid, p_wallet_paid, v_status, 'Pending', p_note)
     returning id into v_order_id;
   end if;
 
-  if v_prior_paid > 0 then
+  if v_wallet_paid > 0 then
     insert into transactions (class_id, user_id, order_id, amount, kind, note)
-    values (p_class_id, p_user_id, v_order_id, v_prior_paid, 'Refund', '訂單修改退款');
+    values (p_class_id, p_user_id, v_order_id, v_wallet_paid, 'Refund', '訂單修改退款');
   end if;
   if p_wallet_paid > 0 then
     insert into transactions (class_id, user_id, order_id, amount, kind, note)
@@ -460,7 +464,7 @@ begin
     raise exception 'ORDER_NOT_FOUND';
   end if;
 
-  v_refund := coalesce(v_order.prior_paid, 0);
+  v_refund := coalesce(v_order.wallet_paid, 0);
   v_balance := v_balance + v_refund;
 
   update users set wallet_balance = v_balance, updated_at = now()
@@ -608,7 +612,7 @@ begin
   update sessions set is_deleted = true, closed_at = now() where id = p_session_id;
 
   for v_order in select * from orders where session_id = p_session_id and (is_deleted is null or is_deleted = false) loop
-    v_refund := coalesce(v_order.prior_paid, 0);
+    v_refund := coalesce(v_order.wallet_paid, 0);
 
     if v_refund > 0 then
       update users set wallet_balance = wallet_balance + v_refund, updated_at = now()

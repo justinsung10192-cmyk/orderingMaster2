@@ -86,14 +86,13 @@ export const actions = {
       await updateRows('menu_items', { id: existing.id }, { name, price, options });
       return { ok: true, itemId: sid(existing.id) };
     }
-    const item = await insertRow('menu_items', {
-      class_id: ctx.classId,
-      store_id: store.id,
-      name,
-      price,
-      options,
-      sort_order: 0,
-    });
+    // 同名品項以 upsert 更新（避免 unique constraint 錯誤）
+    const { data: item, error } = await supabase
+      .from('menu_items')
+      .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options, menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' })
+      .select()
+      .single();
+    if (error) throw appError('DB_ERROR', error.message);
     return { ok: true, itemId: sid(item.id) };
   },
 
@@ -124,14 +123,10 @@ export const actions = {
       const name = String(item?.name || '').trim();
       if (!name) continue;
       const price = num(item?.price);
-      await insertRow('menu_items', {
-        class_id: ctx.classId,
-        store_id: store.id,
-        name,
-        price,
-        options: normalizeOptions(item.options),
-        sort_order: 0,
-      });
+      const { error } = await supabase
+        .from('menu_items')
+        .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options: normalizeOptions(item.options), menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' });
+      if (error) throw appError('DB_ERROR', error.message);
       count += 1;
     }
     return { ok: true, created: count };
@@ -295,14 +290,24 @@ async function findOrCreateStore(classId, name) {
 
 async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01', dish = '') {
   const existing = await findOne('menu_items', { store_id: storeId, name, menu_date: menuDate }, classId);
-  if (existing) {
-    const patch = {};
-    if (dish && existing.dish !== dish) patch.dish = dish;
-    if (price > 0 && Number(existing.price) !== price) patch.price = price;
-    if (Object.keys(patch).length) await updateRows('menu_items', { id: existing.id }, patch);
-    return { item: existing, created: false };
-  }
-  return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, menu_date: menuDate, dish, sort_order: 0 }), created: true };
+  // 以 upsert（ON CONFLICT）寫入，避免並發或重複匯入時觸發 unique constraint 錯誤
+  const row = {
+    class_id: classId,
+    store_id: storeId,
+    name,
+    menu_date: menuDate,
+    price: existing ? (price > 0 ? price : num(existing.price)) : price,
+    dish: dish || (existing?.dish || ''),
+    options,
+    sort_order: 0,
+  };
+  const { data: item, error } = await supabase
+    .from('menu_items')
+    .upsert(row, { onConflict: 'class_id,store_id,name,menu_date' })
+    .select()
+    .single();
+  if (error) throw appError('DB_ERROR', error.message);
+  return { item, created: !existing };
 }
 
 async function findOrCreateSession(classId, storeId, date, cutoffTime = '09:30') {

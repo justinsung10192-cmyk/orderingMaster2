@@ -73,7 +73,7 @@ export const actions = {
     const freshUser = await findOne('users', { id: ctx.user.id }, ctx.classId);
     const balance = num(freshUser.wallet_balance);
     // 已用儲值金支付的部分不得退回現金（避免把錢包餘額轉成現金欠款）
-    const priorPaid = round2(num(existing.prior_paid));
+    const walletPaidSoFar = round2(num(existing.wallet_paid));
 
     let walletPaid = 0;
     let cashOutstanding = 0;
@@ -81,7 +81,7 @@ export const actions = {
       walletPaid = computed.total;
     } else {
       walletPaid = data.useWallet !== false ? round2(Math.min(balance, computed.total)) : 0;
-      if (priorPaid > 0) walletPaid = round2(Math.max(walletPaid, Math.min(priorPaid, computed.total)));
+      if (walletPaidSoFar > 0) walletPaid = round2(Math.max(walletPaid, Math.min(walletPaidSoFar, computed.total)));
       cashOutstanding = round2(computed.total - walletPaid);
     }
 
