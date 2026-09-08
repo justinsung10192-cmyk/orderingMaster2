@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
+import tailwindcss from "@tailwindcss/vite";
 
 // 自動版本號：package.json 的語意版號 + 建置當下的 git commit 短碼。
 // 每次 push 部署（commit 變更）都會自動產生新版本，不需手動修改。
@@ -23,6 +24,7 @@ function resolveVersion() {
 // 精簡建置設定：只打包 client 的靜態前端（index.html + src/app.js）。
 // 後端資料由 Google Apps Script 提供，透過 api/gas.js 同網域代理。
 export default defineConfig({
+  plugins: [tailwindcss()],
   root: path.resolve(process.cwd(), "client"),
   publicDir: path.resolve(process.cwd(), "client", "public"),
   define: {

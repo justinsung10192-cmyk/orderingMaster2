@@ -16,40 +16,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet" />
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: { ledger: '#173B62', apricot: '#F6A04D', stamp: '#0F6B5E', paper: '#F8F5EE', mist: '#EEF3F5' },
-            fontFamily: { sans: ['Noto Sans TC', 'sans-serif'], serif: ['Noto Serif TC', 'serif'] },
-            boxShadow: { paper: '0 12px 28px rgba(23, 59, 98, .10)', lift: '0 18px 42px rgba(23, 59, 98, .18)' }
-          }
-        }
-      };
-    </script>
+    <link rel="stylesheet" href="/src/style.css" />
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <style>
-      :root { color-scheme: light; }
-      * { -webkit-tap-highlight-color: transparent; }
-      body { margin: 0; min-width: 320px; background: #F8F5EE; color: #173B62; font-family: 'Noto Sans TC', sans-serif; }
-      button, input, textarea, select { font: inherit; }
-      button:active { transform: scale(.97); }
-      .safe-top { padding-top: max(1rem, env(safe-area-inset-top)); }
-      .safe-bottom { padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
-      .scroll-hide::-webkit-scrollbar { display: none; }
-      .scroll-hide { scrollbar-width: none; }
-      .view-enter { animation: enter .22s cubic-bezier(.23,1,.32,1); }
-      @keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-      .sheet-enter { animation: sheet .24s cubic-bezier(.23,1,.32,1); }
-      @keyframes sheet { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
-      @media (prefers-reduced-motion: reduce) { *, *:before, *:after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
-      .pin-box { letter-spacing: .4em; font-variant-numeric: tabular-nums; }
-      body.is-busy { cursor: wait; }
-      body.is-busy button, body.is-busy [data-action] { pointer-events: none !important; }
-      body.is-busy::after { content: ''; position: fixed; inset: 0; background: rgba(248,245,238,.45); z-index: 9990; }
-    </style>
   </head>
   <body>
     <div id="app" class="min-h-dvh"></div>

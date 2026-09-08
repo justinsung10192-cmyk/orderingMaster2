@@ -15,7 +15,8 @@ async function tallyVotes(classId, weekLabel) {
 
 export const actions = {
   async getVotes(data, ctx) {
-    const weekLabel = String(data.weekLabel || nextWeekLabel());
+    // 僅限投「下週」，週別由伺服器決定，不信任前端傳值
+    const weekLabel = nextWeekLabel();
     const myVotes = await listRows('votes', { classId: ctx.classId, filters: { user_id: ctx.user.id, week_label: weekLabel } });
     const { tally } = await tallyVotes(ctx.classId, weekLabel);
     const stores = (await listStoresForClass(ctx.classId)).map((store) => ({
@@ -33,7 +34,7 @@ export const actions = {
   },
 
   async castVote(data, ctx) {
-    const weekLabel = String(data.weekLabel || nextWeekLabel());
+    const weekLabel = nextWeekLabel();
     const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
     if (!store) throw appError('NOT_FOUND', '店家不存在。');
     if (!store.is_active) throw appError('CLOSED', '此店家已停用。');
@@ -50,7 +51,7 @@ export const actions = {
   },
 
   async removeVote(data, ctx) {
-    const weekLabel = String(data.weekLabel || nextWeekLabel());
+    const weekLabel = nextWeekLabel();
     const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
     if (!store) throw appError('NOT_FOUND', '店家不存在。');
     await deleteRows('votes', { class_id: ctx.classId, user_id: ctx.user.id, store_id: store.id, week_label: weekLabel });

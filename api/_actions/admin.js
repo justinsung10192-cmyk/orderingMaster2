@@ -1,7 +1,7 @@
 // 動作：管理員儀表板、帳號管理（含管理者安全防呆）、系統設定、匯總、催繳
-import { appError, sid, num, round2, todayString, weekdayName, monthDay, randomCode } from '../_lib/util.js';
+import { appError, sid, num, round2, todayString, weekdayName, monthDay } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase } from '../_lib/db.js';
-import { createPassword } from '../_lib/auth.js';
+import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
 import { dashboardOrderRow, outstandingOf, publicUser, orderItems } from '../_lib/serialize.js';
 
 // 班級至少保留一位管理者
@@ -189,9 +189,7 @@ export const actions = {
   async adminResetPassword(data, ctx) {
     const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
     if (!target) throw appError('NOT_FOUND', '找不到使用者。');
-    // 產生專屬臨時密碼（避免共用 lunch1234 被其他同學猜測登入）
-    const tempPassword = randomCode(8).toLowerCase();
-    const { salt, hash } = createPassword(tempPassword);
+    const { salt, hash } = defaultPasswordCredentials();
     await updateRows('users', { id: target.id }, {
       password_hash: hash,
       salt,
@@ -200,7 +198,7 @@ export const actions = {
     });
     // 使該同學現有的登入 Token 全部失效
     await deleteRows('auth_tokens', { user_id: target.id });
-    return { ok: true, tempPassword, message: '已重設密碼，請將臨時密碼告知該同學。' };
+    return { ok: true, message: '已重設為預設密碼，該同學下次登入需重新設定。' };
   },
 
   async adminSetRole(data, ctx) {

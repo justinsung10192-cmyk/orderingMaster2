@@ -1715,7 +1715,7 @@ async function handleAction(action, target) {
       await withAdminRefresh(async () => { await api('adminSetUserDisabled', { userId: target.getAttribute('data-user'), disabled: !disabled }); toast(disabled ? '帳號已啟用。' : '帳號已停用。', 'success'); });
       break;
     }
-    case 'reset-pw': openConfirm('重設密碼', '將為該同學產生新的臨時密碼，下次登入需重新設定。', async () => { const r = await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast(`已重設，臨時密碼：${r.tempPassword || '請洽管理者'}`, 'success'); await refreshAdmin(); }); break;
+    case 'reset-pw': openConfirm('重設密碼', '將該同學的密碼重設為預設值，下次登入需重新設定。', async () => { await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast('已重設密碼。', 'success'); await refreshAdmin(); }); break;
     case 'del-user': openConfirm('刪除帳號', '刪除後不可復原（該同學的歷史訂單會保留）。', async () => { await api('adminDeleteUser', { userId: target.getAttribute('data-user') }); await refreshAdmin(); }); break;
 
     // 管理員 - 設定
