@@ -38,7 +38,7 @@ const state = {
 
 const ICONS = { order: '⌑', vote: '♡', wallet: '¤', admin: '✓', settings: '☷' };
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.1.0'; // 由 vite.config.ts 於建置時注入
 
 /* ============================ API ============================ */
 async function api(action, data = {}) {
@@ -131,7 +131,8 @@ function renderAuth() {
             <p class="text-center text-xs leading-5 text-slate-400">首次登入請使用預設密碼，登入後系統會要求你修改。</p>
           </form>
         </div>
-      </section>
+              <p class="mt-6 text-center text-[11px] text-slate-400">班級訂餐管理系統 v${APP_VERSION}</p>
+</section>
     </main>`;
   $('#login-form').addEventListener('submit', onLogin);
 }
