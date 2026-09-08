@@ -1,6 +1,6 @@
 // 排程端點：由 Supabase pg_cron 每小時呼叫（?secret=CRON_SECRET）。
 // 1) 訂餐開始推播（補漏） 2) 即將截止推播 3) 每日欠繳催繳推播
-import { readRawBody, sendJson, todayString, mondayOf } from './_lib/util.js';
+import { readRawBody, sendJson } from './_lib/util.js';
 import { supabase, findOne, listRowsIn, updateRows, getAppSetting, setAppSetting } from './_lib/db.js';
 import { sendPushToUser, sendPushToClass } from './_lib/push.js';
 import { outstandingOf } from './_lib/serialize.js';
@@ -69,37 +69,44 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3) 欠繳催繳（依設定間隔發送，預設每天一次）
-    const today = todayString();
+    // 3) 欠繳催繳（頻率 6/12/24 小時；只通知「截止後超過 24 小時仍未結清」者）
     const classRow = await findOne('classes', { class_id: 'demo' });
-    const remindDays = Number(classRow?.overdue_remind_days) || 1;
+    const remindHours = Number(classRow?.overdue_remind_hours) || 24;
     const lastOverdue = await getAppSetting('', 'last_overdue_reminder', '');
-    const daysSince = lastOverdue
-      ? Math.floor((Date.parse(`${today}T00:00:00`) - Date.parse(`${lastOverdue}T00:00:00`)) / 86400000)
-      : 9999;
-    if (daysSince >= remindDays) {
-      const monday = mondayOf();
-      const { data: overdueOrders, error: overdueErr } = await supabase
-        .from('orders')
-        .select('*')
-        .lt('order_date', monday);
-      if (!overdueErr) {
+    const lastTs = lastOverdue ? Date.parse(lastOverdue) : 0;
+    if (!lastTs || now - lastTs >= remindHours * 3600 * 1000) {
+      // 找出「截止時間已超過 24 小時」的場次，再抓其未結清訂單
+      const cutoffThreshold = new Date(now - 24 * 3600 * 1000).toISOString();
+      const { data: expiredSessions, error: sessErr } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('class_id', 'demo')
+        .eq('is_deleted', false)
+        .lt('cutoff_time', cutoffThreshold);
+      if (!sessErr && (expiredSessions || []).length) {
+        const sessionIds = expiredSessions.map((session) => session.id);
+        const { data: unpaidOrders } = await supabase
+          .from('orders')
+          .select('*')
+          .in('session_id', sessionIds)
+          .in('payment_status', ['UnpaidCash', 'PartiallyPaid'])
+          .eq('is_deleted', false);
         const userIds = [...new Set(
-          (overdueOrders || [])
-            .filter((order) => !order.is_deleted && outstandingOf(order) > 0)
+          (unpaidOrders || [])
+            .filter((order) => outstandingOf(order) > 0)
             .map((order) => order.user_id)
             .filter((value) => value != null),
         )];
         for (const userId of userIds) {
           await sendPushToUser(Number(userId), {
             title: '午餐費用提醒',
-            body: '你還有尚未結清的午餐費用，請記得繳交。',
+            body: '你還有超過 24 小時未結清的午餐費用，請記得繳交。',
             url: '/',
           });
           result.overdueReminders += 1;
         }
-        await setAppSetting('', 'last_overdue_reminder', today);
       }
+      await setAppSetting('', 'last_overdue_reminder', new Date(now).toISOString());
     }
 
     result.materialized = await materializeRecurring('demo');

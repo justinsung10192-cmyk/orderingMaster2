@@ -1,5 +1,5 @@
 // 動作：管理員儀表板、帳號管理（含管理者安全防呆）、系統設定、匯總、催繳
-import { appError, sid, num, round2, todayString, weekdayName, monthDay, mondayOf } from '../_lib/util.js';
+import { appError, sid, num, round2, todayString, weekdayName, monthDay } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase } from '../_lib/db.js';
 import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
 import { dashboardOrderRow, outstandingOf, publicUser, orderItems } from '../_lib/serialize.js';
@@ -93,7 +93,6 @@ export const actions = {
   async adminGetDashboard(data, ctx) {
     const date = String(data.date || todayString());
     const summary = await loadDaySummary(ctx.classId, date);
-    const monday = mondayOf();
     // 效能優化：只載入「未結清」訂單（避免全表掃描已結清歷史）
     const { data: unpaidRows, error } = await supabase
       .from('orders')
@@ -103,11 +102,6 @@ export const actions = {
       .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
     if (error) throw appError('DB_ERROR', error.message);
     const activeOrders = unpaidRows || [];
-    const overdueUserIds = new Set(
-      activeOrders
-        .filter((order) => order.order_date < monday)
-        .map((order) => order.user_id),
-    );
 
     // 未繳總整理：所有仍有現金欠款的同學（不限日期），依座號排序
     const debtorUserIds = [...new Set(activeOrders.map((order) => order.user_id).filter((id) => id != null))];
@@ -126,7 +120,7 @@ export const actions = {
     });
     const debtors = [...debtMap.values()].sort((a, b) => num(a.seatNo) - num(b.seatNo));
 
-    return { ...summary, debtors, overdueCount: overdueUserIds.size };
+    return { ...summary, debtors, overdueCount: debtors.length };
   },
 
   async adminGetDaySummary(data, ctx) {
@@ -224,7 +218,7 @@ export const actions = {
     return {
       className: classRow.name,
       pureBalanceMode: Boolean(classRow.pure_balance_mode),
-      overdueRemindDays: Number(classRow.overdue_remind_days) || 1,
+      overdueRemindHours: Number(classRow.overdue_remind_hours) || 24,
     };
   },
 
@@ -234,18 +228,17 @@ export const actions = {
       await updateRows('classes', { class_id: ctx.classId }, { name: className });
     }
     await updateRows('classes', { class_id: ctx.classId }, { pure_balance_mode: Boolean(data.pureBalanceMode) });
-    const remindDays = Number(data.overdueRemindDays);
-    if (Number.isFinite(remindDays) && remindDays >= 1 && remindDays <= 30) {
-      await updateRows('classes', { class_id: ctx.classId }, { overdue_remind_days: Math.round(remindDays) });
+    const remindHours = Number(data.overdueRemindHours);
+    if ([6, 12, 24].includes(remindHours)) {
+      await updateRows('classes', { class_id: ctx.classId }, { overdue_remind_hours: remindHours });
     }
     return { ok: true };
   },
 
   // ---- 催繳 ----
   async adminGetOverdueList(_data, ctx) {
-    const monday = mondayOf();
     const orders = (await listRows('orders', { classId: ctx.classId })).filter(
-      (order) => !order.is_deleted && order.order_date < monday && outstandingOf(order) > 0,
+      (order) => !order.is_deleted && outstandingOf(order) > 0,
     );
     const userIds = [...new Set(orders.map((order) => order.user_id).filter((id) => id != null))];
     const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId }) : [];
@@ -274,7 +267,7 @@ export const actions = {
       })
       .sort((a, b) => num(a.seatNo) - num(b.seatNo));
 
-    return { monday, list, totalDebt: round2(list.reduce((sum, row) => sum + row.debt, 0)) };
+    return { list, totalDebt: round2(list.reduce((sum, row) => sum + row.debt, 0)) };
   },
 
   // 刪除所有業務資料（訂單/交易/場次/投票/放假/店家/菜單），並將儲值餘額歸零。帳號保留。

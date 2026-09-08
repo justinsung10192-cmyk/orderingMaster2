@@ -40,11 +40,13 @@ create table if not exists public.classes (
   class_id             text not null unique,
   name                 text not null default '三年甲班',
   pure_balance_mode    boolean not null default false,   -- true = 純儲值模式（餘額不足禁止下單）
-  overdue_remind_days  int not null default 1,           -- 欠繳催繳提醒間隔（天）
+  overdue_remind_days  int not null default 1,           -- 舊欄位（已由 overdue_remind_hours 取代）
+  overdue_remind_hours int not null default 24,          -- 欠繳催繳提醒頻率（6/12/24 小時）
   created_at           timestamptz not null default now()
 );
 -- 既有資料庫升級用：補上 overdue_remind_days 欄位（全新專案可略過）
 alter table public.classes add column if not exists overdue_remind_days int not null default 1;
+alter table public.classes add column if not exists overdue_remind_hours int not null default 24;
 
 -- 帳號 ----------------------------------------------------------------------
 create table if not exists public.users (

@@ -1136,8 +1136,8 @@ function renderSettingsHtml(content) {
           </button>
           <div>
             <label class="mb-1 block text-xs font-bold text-slate-500">欠繳催繳提醒頻率</label>
-            <select id="remind-days" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger">
-              ${[1, 2, 3, 7, 14].map((n) => `<option value="${n}" ${Number(settings.overdueRemindDays) === n ? 'selected' : ''}>每 ${n} 天提醒一次</option>`).join('')}
+            <select id="remind-hours" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger">
+              ${[6, 12, 24].map((h) => `<option value="${h}" ${Number(settings.overdueRemindHours) === h ? 'selected' : ''}>每 ${h} 小時提醒一次</option>`).join('')}
             </select>
           </div>
           <button data-action="save-settings" class="w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲存設定</button>
@@ -1145,7 +1145,7 @@ function renderSettingsHtml(content) {
       </div>
       <button data-action="view-overdue" class="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-paper ring-1 ring-ledger/5">
         <p class="font-bold text-red-600">欠繳催繳名單</p>
-        <p class="mt-0.5 text-xs text-slate-500">自動辨識超過星期一仍未繳費的同學</p>
+        <p class="mt-0.5 text-xs text-slate-500">顯示所有仍有現金欠款的同學</p>
       </button>
       <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
         <h2 class="font-serif text-lg font-black text-red-600">危險區域</h2>
@@ -1190,7 +1190,7 @@ async function viewOverdue() {
 async function copyOverdue() {
   try {
     const data = await api('adminGetOverdueList');
-    const lines = [`📢 午餐費用催繳通知（超過星期一尚未繳費）`, `應繳人數：${data.list.length} 人，總金額 $${money(data.totalDebt)}`, ''];
+    const lines = [`📢 午餐費用催繳通知`, `應繳人數：${data.list.length} 人，總金額 $${money(data.totalDebt)}`, ''];
     data.list.forEach((user) => lines.push(`${user.seatNo}號 ${user.studentName}：$${money(user.debt)}`));
     const text = lines.join('\n');
     await navigator.clipboard.writeText(text);
@@ -1719,8 +1719,8 @@ async function handleAction(action, target) {
     // 管理員 - 設定
     case 'save-settings': {
       const className = $('#class-name')?.value.trim();
-      const overdueRemindDays = Number($('#remind-days')?.value || 1);
-      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode, overdueRemindDays }); toast('設定已儲存。', 'success'); });
+      const overdueRemindHours = Number($('#remind-hours')?.value || 24);
+      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode, overdueRemindHours }); toast('設定已儲存。', 'success'); });
       break;
     }
     case 'view-overdue': await viewOverdue(); break;
