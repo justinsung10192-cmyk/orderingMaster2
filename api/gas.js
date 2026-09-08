@@ -72,6 +72,7 @@ const ADMIN = new Set([
   'adminImportVendorMenu',
   'adminGetDailyMenus',
   'adminDeleteDailyMenu',
+  'adminClearDailyMenus',
 ]);
 
 export const config = { api: { bodyParser: false } };

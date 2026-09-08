@@ -937,6 +937,7 @@ async function renderAdminDailyMenu(content) {
             </div>
             <div class="flex gap-2">
               <input id="daily-month" type="month" value="${month}" class="w-36 rounded-xl border border-slate-200 px-2 py-2 text-sm outline-none focus:border-ledger" />
+              <button data-action="clear-daily" class="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">一鍵刪除</button>
               <button data-action="monthly-menu" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">＋ 上傳菜單</button>
             </div>
           </div>
@@ -1618,7 +1619,10 @@ async function handleAction(action, target) {
     case 'monthly-menu': openMonthlyScan(); break;
     case 'save-vendor-items': await saveVendorItems(); break;
     case 'del-daily': openConfirm('刪除當天菜單', '會刪除該店家當天的品項並將場次標記刪除，確定嗎？', async () => { await api('adminDeleteDailyMenu', { date: target.getAttribute('data-date'), storeId: target.getAttribute('data-store') }); toast('已刪除。', 'success'); await refreshAdmin(); }); break;
+    case 'clear-daily': { const month = state.admin.dailyMonth || todayString().slice(0, 7); openConfirm('一鍵刪除每日菜單', `將刪除 ${month} 月所有每日菜單（品項與對應場次），確定嗎？`, async () => { const r = await api('adminClearDailyMenus', { month }); toast(`已刪除 ${r.deletedItems} 個品項、${r.deletedSessions} 個場次。`, 'success'); await refreshAdmin(); }); break; }
     case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
+    case 'del-monthly-item': { const ei = Number(target.getAttribute('data-index')); const ii = Number(target.getAttribute('data-item')); const entry = state.monthlyEntries[ei]; if (entry?.items) { entry.items.splice(ii, 1); renderMonthlyList(); } break; }
+    case 'add-monthly-item': { const ei = Number(target.getAttribute('data-index')); const entry = state.monthlyEntries[ei]; if (entry) { entry.items.push({ name: '', price: 0, dish: '' }); renderMonthlyList(); } break; }
     case 'save-item': await saveItem(target.getAttribute('data-item')); break;
     case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
     case 'del-ai-item': {
@@ -1936,28 +1940,74 @@ function showVendorPreview(storeName, entries) {
 function renderMonthlyList() {
   const listEl = $('#monthly-list');
   if (!listEl) return;
-  listEl.innerHTML = state.monthlyEntries.length ? state.monthlyEntries.map((entry, index) => `
-    <div class="mb-2 flex items-start justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-ledger/5">
-      <div class="min-w-0">
-        <p class="text-sm font-bold text-ledger">${escapeHtml(entry.date)}</p>
-        <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(entry.items.map((it) => `${it.name} $${money(it.price)}`).join('、'))}</p>
+  if (!state.monthlyEntries.length) {
+    listEl.innerHTML = '<p class="py-8 text-center text-sm text-slate-400">沒有辨識到任何資料。</p>';
+    return;
+  }
+  listEl.innerHTML = state.monthlyEntries.map((entry, ei) => `
+    <div class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-ledger/5">
+      <div class="flex items-center justify-between gap-2">
+        <label class="flex items-center gap-2 text-xs font-bold text-slate-400">日期
+          <input data-entry-date="${ei}" type="date" value="${escapeHtml(entry.date)}" class="rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold text-ledger outline-none focus:border-ledger" />
+        </label>
+        <button data-action="del-monthly-entry" data-index="${ei}" class="shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
       </div>
-      <button data-action="del-monthly-entry" data-index="${index}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
-    </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">沒有辨識到任何資料。</p>';
+      <div class="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
+        <span class="flex-1">種類</span><span class="flex-1">菜色</span><span class="w-16">價格</span><span class="w-7"></span>
+      </div>
+      <div class="mt-1 space-y-1.5">
+        ${entry.items.map((it, ii) => {
+          const missing = !it.price || Number(it.price) <= 0;
+          return `
+          <div class="flex items-center gap-1.5">
+            <input data-item-name="${ei}-${ii}" value="${escapeHtml(it.name)}" placeholder="種類" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+            <input data-item-dish="${ei}-${ii}" value="${escapeHtml(it.dish || '')}" placeholder="菜色" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+            <input data-item-price="${ei}-${ii}" type="number" min="0" step="1" value="${it.price || ''}" placeholder="價格" class="w-16 rounded-lg border px-2 py-1.5 text-xs outline-none ${missing ? 'border-red-400 bg-red-50 font-bold text-red-600' : 'border-slate-200 focus:border-ledger'}" />
+            <button data-action="del-monthly-item" data-index="${ei}" data-item="${ii}" class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-xs text-slate-400">×</button>
+          </div>`;
+        }).join('')}
+      </div>
+      <button data-action="add-monthly-item" data-index="${ei}" class="mt-2 rounded-lg bg-mist px-2 py-1 text-[11px] font-bold text-ledger">＋ 加品項</button>
+    </div>`).join('');
+  bindMonthlyEditors();
+}
+
+function bindMonthlyEditors() {
+  const listEl = $('#monthly-list');
+  if (!listEl) return;
+  const pair = (value) => value.split('-').map(Number);
+  listEl.querySelectorAll('input[data-entry-date]').forEach((el) => {
+    el.addEventListener('input', () => { const i = Number(el.dataset.entryDate); if (state.monthlyEntries[i]) state.monthlyEntries[i].date = el.value; });
+  });
+  listEl.querySelectorAll('input[data-item-name]').forEach((el) => {
+    el.addEventListener('input', () => { const [ei, ii] = pair(el.dataset.itemName); const it = state.monthlyEntries[ei]?.items?.[ii]; if (it) it.name = el.value; });
+  });
+  listEl.querySelectorAll('input[data-item-dish]').forEach((el) => {
+    el.addEventListener('input', () => { const [ei, ii] = pair(el.dataset.itemDish); const it = state.monthlyEntries[ei]?.items?.[ii]; if (it) it.dish = el.value; });
+  });
+  listEl.querySelectorAll('input[data-item-price]').forEach((el) => {
+    el.addEventListener('input', () => { const [ei, ii] = pair(el.dataset.itemPrice); const it = state.monthlyEntries[ei]?.items?.[ii]; if (it) it.price = Number(el.value) || 0; });
+  });
 }
 
 async function saveVendorItems() {
   const storeName = state.monthlyStore || '';
   const entries = state.monthlyEntries || [];
-  try {
-    await busy(async () => {
+  const missing = entries.reduce((acc, entry) => acc + (entry.items || []).filter((it) => !it.price || Number(it.price) <= 0).length, 0);
+  const doSave = async () => {
+    try {
       const result = await api('adminImportVendorMenu', { storeName, entries });
       closeModal();
       toast(`已匯入「${result.storeName}」：${result.createdItems} 個品項、${result.createdSessions} 個場次。`, 'success');
       await refreshAdmin();
-    });
-  } catch (error) {
-    toast(error.message, 'error');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  };
+  if (missing > 0) {
+    openConfirm('仍有品項未填價格', `有 ${missing} 個品項的價格為 0（未辨識到）。確定仍要匯入嗎？`, doSave);
+  } else {
+    await busy(doSave);
   }
 }
 

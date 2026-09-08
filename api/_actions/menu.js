@@ -247,6 +247,41 @@ export const actions = {
     }
     return { ok: true };
   },
+
+  // 一鍵刪除每日菜單：刪除指定月份（未指定則全部）的日期品項，並軟刪除對應場次
+  async adminClearDailyMenus(data, ctx) {
+    const month = String(data.month || '').trim();
+    let query = supabase
+      .from('menu_items')
+      .select('id, store_id, menu_date')
+      .eq('class_id', ctx.classId)
+      .neq('menu_date', '1970-01-01');
+    if (/^\d{4}-\d{2}$/.test(month)) {
+      const [year, mon] = month.split('-').map(Number);
+      const next = mon === 12 ? `${year + 1}-01` : `${year}-${String(mon + 1).padStart(2, '0')}`;
+      query = query.gte('menu_date', `${month}-01`).lt('menu_date', `${next}-01`);
+    }
+    const { data: items, error } = await query;
+    if (error) throw appError('DB_ERROR', error.message);
+    const dated = (items || []).filter((item) => item.menu_date !== '1970-01-01');
+    if (!dated.length) return { ok: true, deletedItems: 0, deletedSessions: 0 };
+
+    const ids = dated.map((item) => item.id);
+    const { error: delErr } = await supabase.from('menu_items').delete().in('id', ids).eq('class_id', ctx.classId);
+    if (delErr) throw appError('DB_ERROR', delErr.message);
+
+    const pairs = [...new Set(dated.map((item) => `${item.store_id}|${item.menu_date}`))];
+    let deletedSessions = 0;
+    for (const pair of pairs) {
+      const [storeId, date] = pair.split('|');
+      const session = await findOne('sessions', { store_id: Number(storeId), order_date: date }, ctx.classId);
+      if (session && !session.is_deleted) {
+        await updateRows('sessions', { id: session.id }, { is_deleted: true });
+        deletedSessions += 1;
+      }
+    }
+    return { ok: true, deletedItems: dated.length, deletedSessions };
+  },
 };
 
 // ---- 每月菜單匯入輔助 ----
@@ -259,7 +294,10 @@ async function findOrCreateStore(classId, name) {
 async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01', dish = '') {
   const existing = await findOne('menu_items', { store_id: storeId, name, menu_date: menuDate }, classId);
   if (existing) {
-    if (dish && existing.dish !== dish) await updateRows('menu_items', { id: existing.id }, { dish });
+    const patch = {};
+    if (dish && existing.dish !== dish) patch.dish = dish;
+    if (price > 0 && Number(existing.price) !== price) patch.price = price;
+    if (Object.keys(patch).length) await updateRows('menu_items', { id: existing.id }, patch);
     return { item: existing, created: false };
   }
   return { item: await insertRow('menu_items', { class_id: classId, store_id: storeId, name, price, options, menu_date: menuDate, dish, sort_order: 0 }), created: true };
