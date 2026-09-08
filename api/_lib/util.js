@@ -61,8 +61,21 @@ export function toIso(value) {
 export async function readRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    let total = 0;
+    let exceeded = false;
+    const MAX = 12 * 1024 * 1024; // 12MB 上限（AI 圖檔 base64 上限 8MB + JSON 包裝）
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > MAX) {
+        if (!exceeded) {
+          exceeded = true;
+          reject(new AppError('INVALID_INPUT', '請求內容過大，請縮小圖片後再試。'));
+        }
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => { if (!exceeded) resolve(Buffer.concat(chunks).toString('utf8')); });
     req.on('error', reject);
   });
 }

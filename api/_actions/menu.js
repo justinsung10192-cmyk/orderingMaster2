@@ -1,6 +1,6 @@
 // 動作：店家與菜單管理（資料夾式：店家 → 品項 → 客製選項）
 import { appError, sid, num, weekLabelOf, weekdayName } from '../_lib/util.js';
-import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores, supabase } from '../_lib/db.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, callRpc, listStoresForClass, listMenuItemsForStore, listMenuItemsForStores, supabase } from '../_lib/db.js';
 
 function normalizeOptions(options) {
   if (!Array.isArray(options)) return [];
@@ -243,7 +243,7 @@ export const actions = {
     await deleteRows('menu_items', { class_id: ctx.classId, store_id: storeId, menu_date: date });
     const session = await findOne('sessions', { store_id: storeId, order_date: date }, ctx.classId);
     if (session && !session.is_deleted) {
-      await updateRows('sessions', { id: session.id }, { is_deleted: true });
+      await callRpc('fn_delete_session_and_refund', { p_class_id: ctx.classId, p_session_id: session.id });
     }
     return { ok: true };
   },
@@ -272,15 +272,17 @@ export const actions = {
 
     const pairs = [...new Set(dated.map((item) => `${item.store_id}|${item.menu_date}`))];
     let deletedSessions = 0;
+    let refundedOrders = 0;
     for (const pair of pairs) {
       const [storeId, date] = pair.split('|');
       const session = await findOne('sessions', { store_id: Number(storeId), order_date: date }, ctx.classId);
       if (session && !session.is_deleted) {
-        await updateRows('sessions', { id: session.id }, { is_deleted: true });
+        const result = await callRpc('fn_delete_session_and_refund', { p_class_id: ctx.classId, p_session_id: session.id });
         deletedSessions += 1;
+        refundedOrders += num(result?.refunded_count);
       }
     }
-    return { ok: true, deletedItems: dated.length, deletedSessions };
+    return { ok: true, deletedItems: dated.length, deletedSessions, refundedOrders };
   },
 };
 

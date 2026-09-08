@@ -1,5 +1,5 @@
 // 動作：下單、修改、刪除訂單（截止前可自由修改）
-import { appError, sid, num, round2 } from '../_lib/util.js';
+import { appError, sid, num, round2, todayString } from '../_lib/util.js';
 import { findOne, callRpc, listMenuItemsForStore, isPureBalanceMode } from '../_lib/db.js';
 import { computeOrderItems, publicOrder } from '../_lib/serialize.js';
 
@@ -7,6 +7,7 @@ async function loadOrderContext(data, ctx) {
   const session = await findOne('sessions', { id: Number(data.sessionId) }, ctx.classId);
   if (!session || session.is_deleted) throw appError('NOT_FOUND', '找不到場次。');
   if (!session.is_open) throw appError('CLOSED', '此場次尚未開放或已結束。');
+  if (session.order_date < todayString()) throw appError('CLOSED', '此場次日期已過，無法訂餐。');
   if (new Date(session.cutoff_time).getTime() < Date.now()) {
     throw appError('CUTOFF_PASSED', '已超過截止時間，無法修改訂單。');
   }
@@ -71,16 +72,17 @@ export const actions = {
     const pureMode = await isPureBalanceMode(ctx.classId);
     const freshUser = await findOne('users', { id: ctx.user.id }, ctx.classId);
     const balance = num(freshUser.wallet_balance);
+    // 已用儲值金支付的部分不得退回現金（避免把錢包餘額轉成現金欠款）
+    const priorPaid = round2(num(existing.prior_paid));
 
     let walletPaid = 0;
     let cashOutstanding = 0;
     if (pureMode) {
       walletPaid = computed.total;
-    } else if (data.useWallet !== false) {
-      walletPaid = round2(Math.min(balance, computed.total));
-      cashOutstanding = round2(computed.total - walletPaid);
     } else {
-      cashOutstanding = computed.total;
+      walletPaid = data.useWallet !== false ? round2(Math.min(balance, computed.total)) : 0;
+      if (priorPaid > 0) walletPaid = round2(Math.max(walletPaid, Math.min(priorPaid, computed.total)));
+      cashOutstanding = round2(computed.total - walletPaid);
     }
 
     const result = await callRpc('fn_settle_order', {
@@ -100,7 +102,9 @@ export const actions = {
 
   async deleteOrder(data, ctx) {
     const session = await findOne('sessions', { id: Number(data.sessionId) }, ctx.classId);
-    if (!session) throw appError('NOT_FOUND', '找不到場次。');
+    if (!session || session.is_deleted) throw appError('NOT_FOUND', '找不到場次。');
+    if (!session.is_open) throw appError('CLOSED', '此場次尚未開放或已結束。');
+    if (session.order_date < todayString()) throw appError('CLOSED', '此場次日期已過，無法刪除訂單。');
     if (new Date(session.cutoff_time).getTime() < Date.now()) {
       throw appError('CUTOFF_PASSED', '已超過截止時間，無法刪除訂單。');
     }
