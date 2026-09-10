@@ -2,7 +2,7 @@
 import { appError, sid, num, round2, todayString, weekdayName, monthDay } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase } from '../_lib/db.js';
 import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
-import { dashboardOrderRow, outstandingOf, publicUser, orderItems } from '../_lib/serialize.js';
+import { dashboardOrderRow, outstandingOf, publicUser, orderItems, itemNameOf } from '../_lib/serialize.js';
 
 // 班級至少保留一位管理者
 async function ensureNotLastAdmin(classId, userId) {
@@ -36,6 +36,26 @@ async function loadDaySummary(classId, date) {
 
   const sessionStats = sessions.map((session) => {
     const sessionOrders = orders.filter((order) => String(order.session_id) === String(session.id));
+    // 本場次品項彙總（分場次，不混在一起）
+    const itemMap = new Map();
+    sessionOrders.forEach((order) => {
+      orderItems(order).forEach((item) => {
+        const optKey = (item.options || []).map((option) => option.name).join('、');
+        const key = `${item.itemName}|||${optKey}`;
+        const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name), quantity: 0 };
+        entry.quantity += Number(item.quantity) || 0;
+        itemMap.set(key, entry);
+      });
+    });
+    const itemTotals = [...itemMap.values()].sort((a, b) => b.quantity - a.quantity);
+    // 尚未取餐名單（依座號排序）
+    const notPickedUp = sessionOrders
+      .filter((order) => order.pickup_status !== 'PickedUp')
+      .map((order) => {
+        const user = userById.get(String(order.user_id));
+        return { orderId: sid(order.id), userId: sid(order.user_id), seatNo: user?.seat_no || '', studentName: user?.student_name || '已刪除帳號', itemName: itemNameOf(order) };
+      })
+      .sort((a, b) => num(a.seatNo) - num(b.seatNo));
     return {
       sessionId: sid(session.id),
       storeName: storeById.get(String(session.store_id))?.name || '未命名店家',
@@ -43,7 +63,10 @@ async function loadDaySummary(classId, date) {
       orderCount: sessionOrders.length,
       totalAmount: round2(sessionOrders.reduce((sum, order) => sum + num(order.total_price), 0)),
       pickedUp: sessionOrders.filter((order) => order.pickup_status === 'PickedUp').length,
+      notPickedUpCount: notPickedUp.length,
+      notPickedUp,
       unpaidAmount: round2(sessionOrders.reduce((sum, order) => sum + outstandingOf(order), 0)),
+      itemTotals,
     };
   });
 

@@ -29,6 +29,7 @@ export default async function handler(req, res) {
       .from('sessions')
       .select('*')
       .eq('is_open', true)
+      .eq('is_deleted', false)
       .eq('start_notice_sent', false);
     if (!startErr) {
       for (const session of startSessions || []) {
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
       .from('sessions')
       .select('*')
       .eq('is_open', true)
+      .eq('is_deleted', false)
       .eq('cutoff_reminder_sent', false)
       .lte('cutoff_time', horizon)
       .gte('cutoff_time', new Date(now).toISOString());

@@ -463,7 +463,10 @@ function renderOrderSheet() {
                 <input type="checkbox" id="use-wallet" ${draft.useWallet ? 'checked' : ''} class="h-5 w-5 accent-stamp" />
               </label>
             `}
-            <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+                        <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+            <div class="mb-3 mt-1.5 flex flex-wrap gap-1.5">
+              ${['加飯', '加大', '少飯', '不要辣', '免餐具'].map((tag) => `<button type="button" data-note-tag="${tag}" class="rounded-full bg-mist px-2.5 py-1 text-xs font-bold text-ledger ring-1 ring-ledger/10">${tag}</button>`).join('')}
+            </div>
             <div class="flex items-center justify-between">
               <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
               <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${session.existingOrder ? '更新訂單' : '送出訂單'}</button>
@@ -476,6 +479,16 @@ function renderOrderSheet() {
 
   $('#use-wallet')?.addEventListener('change', (event) => { state.orderDraft.useWallet = event.target.checked; });
   $('#order-note')?.addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
+  modalRoot.querySelectorAll('[data-note-tag]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const tag = el.getAttribute('data-note-tag');
+      const current = String(state.orderDraft.note || '');
+      if (current.includes(tag)) return;
+      state.orderDraft.note = current ? `${current}、${tag}` : tag;
+      const input = $('#order-note');
+      if (input) input.value = state.orderDraft.note;
+    });
+  });
   $('#submit-order')?.addEventListener('click', () => { if (!insufficient) submitOrder(); });
   $('#delete-order')?.addEventListener('click', () => openConfirm('刪除訂單', '刪除後已扣儲值金將自動退回。', deleteCurrentOrder));
 }
@@ -787,22 +800,7 @@ async function renderAdminDashboard(content) {
                 <span class="ml-2 shrink-0 font-bold tabular-nums text-red-600">欠 ${fmtMoney(d.debt)}</span>
               </div>`).join('')}
           </div>` : ''}
-        ${data.itemTotals.length ? `
-          <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
-            <p class="text-[11px] font-bold tracking-[.13em] text-stamp">ITEM SUMMARY</p>
-            <h3 class="font-serif text-lg font-black">品項總整理</h3>
-            <div class="mt-3 grid grid-cols-2 gap-2">
-              ${data.itemTotals.map((item) => `
-                <div class="flex items-center justify-between rounded-lg bg-mist/60 px-3 py-2.5">
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-bold text-ledger">${escapeHtml(item.name)}</p>
-                    ${item.options.length ? `<p class="truncate text-xs text-slate-400">${escapeHtml(item.options.join('、'))}</p>` : ''}
-                  </div>
-                  <span class="ml-2 shrink-0 rounded-full bg-stamp px-2 py-0.5 text-xs font-bold text-white">×${item.quantity}</span>
-                </div>`).join('')}
-            </div>
-          </div>` : ''}
-        ${data.overdueCount ? `<button data-action="view-overdue" class="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600">⚠️ 有 ${data.overdueCount} 位同學尚未繳費，點此查看</button>` : ''}
+                ${data.overdueCount ? `<button data-action="view-overdue" class="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600">⚠️ 有 ${data.overdueCount} 位同學尚未繳費，點此查看</button>` : ''}
 
         ${data.sessionStats.length ? data.sessionStats.map((session) => `
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
@@ -810,11 +808,30 @@ async function renderAdminDashboard(content) {
               <p class="font-bold text-ledger">${escapeHtml(session.storeName)}</p>
               <span class="text-xs text-slate-400">截止 ${formatClock(session.cutoffTime)}</span>
             </div>
-            <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+            <div class="mt-2 grid grid-cols-4 gap-2 text-center">
               <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">訂單</p><p class="font-black tabular-nums">${session.orderCount}</p></div>
               <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">金額</p><p class="font-black tabular-nums">$${money(session.totalAmount)}</p></div>
               <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">未繳</p><p class="font-black tabular-nums text-red-600">$${money(session.unpaidAmount)}</p></div>
+              <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">未取餐</p><p class="font-black tabular-nums text-amber-600">${session.notPickedUpCount}</p></div>
             </div>
+            ${session.itemTotals.length ? `
+              <div class="mt-3 border-t border-dashed border-ledger/10 pt-2">
+                <p class="mb-1 text-[10px] font-bold tracking-[.13em] text-stamp">品項整理</p>
+                ${session.itemTotals.map((item) => `
+                  <div class="flex items-center justify-between py-1">
+                    <span class="truncate text-xs text-slate-600">${escapeHtml(item.name)}${item.options.length ? '（' + escapeHtml(item.options.join('、')) + '）' : ''}</span>
+                    <span class="ml-2 shrink-0 text-xs font-bold tabular-nums text-ledger">×${item.quantity}</span>
+                  </div>`).join('')}
+              </div>` : ''}
+            ${session.notPickedUp.length ? `
+              <div class="mt-2 border-t border-dashed border-ledger/10 pt-2">
+                <p class="mb-1 text-[10px] font-bold tracking-[.13em] text-amber-600">尚未取餐</p>
+                ${session.notPickedUp.map((u) => `
+                  <div class="flex items-center justify-between py-1">
+                    <span class="truncate text-xs text-slate-600">${escapeHtml(u.seatNo)} ${escapeHtml(u.studentName)} · ${escapeHtml(u.itemName)}</span>
+                    <button data-action="cancel-order" data-order="${u.orderId}" class="ml-2 shrink-0 rounded-md bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600">取消訂單</button>
+                  </div>`).join('')}
+              </div>` : ''}
           </div>`).join('') : '<p class="rounded-2xl bg-white/60 px-4 py-10 text-center text-sm text-slate-400">今天沒有排定場次。</p>'}
 
         ${data.orders.length ? `
@@ -832,6 +849,7 @@ async function renderAdminDashboard(content) {
                     <span class="text-[10px] font-bold ${paymentColor(order.paymentStatus)}">${paymentLabel(order.paymentStatus)}</span>
                   </div>
                   ${order.outstandingAmount > 0 ? `<button data-action="settle-order" data-order="${order.orderId}" data-user="${order.userId}" class="rounded-lg bg-stamp px-2.5 py-1.5 text-[11px] font-bold text-white">結帳</button>` : ''}
+                  <button data-action="cancel-order" data-order="${order.orderId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">取消</button>
                 </div>
               </div>`).join('')}
           </div>` : ''}
@@ -1527,7 +1545,6 @@ async function onClick(event) {
     if (nav === 'settings' && !state.user) return;
     state.view = nav;
     if (nav === 'admin') state.adminTab = 'dashboard';
-    render();
     refreshBoot()
       .then(() => { if (state.view === nav && state.user) render(); })
       .catch(() => {});
@@ -1705,6 +1722,7 @@ async function handleAction(action, target) {
     }
     case 'topup': openTopupModal(target.getAttribute('data-user')); break;
     case 'settle-order': openConfirm('現金結帳', '確認已收取此筆訂單現金並結清？', async () => { await api('adminSettleCash', { userId: target.getAttribute('data-user'), orderIds: [target.getAttribute('data-order')] }); toast('已結帳。', 'success'); await refreshAdmin(); }); break;
+    case 'cancel-order': openConfirm('取消訂單', '將取消此訂單，已付儲值金會退回該同學錢包。確定嗎？', async () => { const r = await api('adminCancelOrder', { orderId: target.getAttribute('data-order') }); toast(r.refunded > 0 ? ('已取消，退款 ' + money(r.refunded) + ' 元。') : '已取消訂單（無退款）。', 'success'); await refreshAdmin(); }); break;
 
     // 管理員 - 帳號
     case 'add-user': openAddUserModal(); break;

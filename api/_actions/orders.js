@@ -118,4 +118,16 @@ export const actions = {
     });
     return { ok: true, walletBalance: num(result.wallet_balance), refunded: num(result.refunded) };
   },
+
+  // 管理者幫某位同學取消訂單並退款（已付儲值金者會退回錢包）
+  async adminCancelOrder(data, ctx) {
+    const order = await findOne('orders', { id: Number(data.orderId) }, ctx.classId);
+    if (!order) throw appError('NOT_FOUND', '找不到訂單。');
+    const result = await callRpc('fn_refund_order', {
+      p_class_id: ctx.classId,
+      p_user_id: order.user_id,
+      p_order_id: order.id,
+    });
+    return { ok: true, refunded: num(result.refunded), walletBalance: num(result.wallet_balance) };
+  },
 };
