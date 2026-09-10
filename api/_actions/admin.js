@@ -12,6 +12,23 @@ async function ensureNotLastAdmin(classId, userId) {
   }
 }
 
+// 今日值日生：依座號輪值，略過免值日與停用帳號（每天輪動兩位）
+function computeDuty(users, date) {
+  const eligible = users
+    .filter((user) => !user.is_disabled && !user.duty_exempt)
+    .sort((a, b) => num(a.seat_no) - num(b.seat_no));
+  if (!eligible.length) return [];
+  const day = Math.floor(Date.parse(`${date}T00:00:00`) / 86400000);
+  const count = eligible.length;
+  const take = count >= 2 ? 2 : 1;
+  const out = [];
+  for (let i = 0; i < take; i += 1) {
+    const u = eligible[(day + i) % count];
+    out.push({ id: sid(u.id), seatNo: u.seat_no, name: u.student_name });
+  }
+  return out;
+}
+
 async function loadDaySummary(classId, date) {
   const sessions = (await listRows('sessions', { classId, filters: { order_date: date }, order: 'cutoff_time' }))
     .filter((session) => !session.is_deleted);
@@ -143,7 +160,11 @@ export const actions = {
     });
     const debtors = [...debtMap.values()].sort((a, b) => num(a.seatNo) - num(b.seatNo));
 
-    return { ...summary, debtors, overdueCount: debtors.length };
+    // 今日值日生：依座號輪值，略過免值日與停用帳號
+    const allUsers = await listRows('users', { classId: ctx.classId });
+    const dutyStudents = computeDuty(allUsers, date);
+
+    return { ...summary, debtors, overdueCount: debtors.length, dutyStudents };
   },
 
   async adminGetDaySummary(data, ctx) {
@@ -302,5 +323,28 @@ export const actions = {
     }
     await updateRows('users', { class_id: classId }, { wallet_balance: 0, updated_at: new Date().toISOString() });
     return { ok: true };
+  },
+
+  // 設定/取消「免值日」
+  async adminSetDutyExempt(data, ctx) {
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    await updateRows('users', { id: target.id }, { duty_exempt: Boolean(data.dutyExempt) });
+    return { ok: true };
+  },
+
+  // 匯出完整資料備份（JSON）
+  async adminExportBackup(_data, ctx) {
+    const tables = ['classes', 'users', 'stores', 'menu_items', 'sessions', 'orders', 'transactions', 'verification_records', 'votes', 'holidays', 'recurring_menu', 'app_settings'];
+    const dump = {};
+    for (const table of tables) {
+      const { data, error } = await supabase.from(table).select('*').eq('class_id', ctx.classId);
+      if (error) throw appError('DB_ERROR', error.message);
+      dump[table] = data || [];
+    }
+    // 全域設定（class_id=''）一併備份
+    const { data: globalSettings, error: gErr } = await supabase.from('app_settings').select('*').eq('class_id', '');
+    if (!gErr) dump.app_settings = [...(dump.app_settings || []), ...(globalSettings || [])];
+    return { exportedAt: new Date().toISOString(), classId: ctx.classId, backup: dump };
   },
 };

@@ -160,7 +160,7 @@ export const actions = {
     return { ok: true, stores, items, sessions };
   },
 
-  // 匯入廠商每月菜單：依「廠商名稱」建立/更新店家、日期專屬品項與每天場次
+  // 匯入廠商每月菜單：整合至「每日菜單」合併店家，每天一個場次（品項名稱加廠商前綴）
   async adminImportVendorMenu(data, ctx) {
     const storeName = String(data.storeName || '').trim();
     if (!storeName) throw appError('INVALID_INPUT', '請輸入廠商名稱。');
@@ -168,7 +168,7 @@ export const actions = {
     if (!entries.length) throw appError('INVALID_INPUT', '沒有可匯入的菜單資料。');
     if (entries.length > 200) throw appError('INVALID_INPUT', '單次最多匯入 200 天。');
 
-    const storeResult = await findOrCreateStore(ctx.classId, storeName);
+    const dailyStore = await findOrCreateDailyStore(ctx.classId);
     let createdItems = 0;
     let createdSessions = 0;
     for (const entry of entries) {
@@ -179,13 +179,13 @@ export const actions = {
       for (const item of items) {
         const name = String(item?.name || '').trim();
         if (!name) continue;
-        const itemResult = await findOrCreateMenuItem(ctx.classId, storeResult.store.id, name, num(item?.price), normalizeOptions(item.options), date, String(item?.dish || '').trim());
+        const itemResult = await findOrCreateMenuItem(ctx.classId, dailyStore.id, `${storeName}·${name}`, num(item?.price), normalizeOptions(item.options), date, String(item?.dish || '').trim());
         if (itemResult.created) createdItems += 1;
       }
-      const sessionResult = await findOrCreateSession(ctx.classId, storeResult.store.id, date);
+      const sessionResult = await findOrCreateSession(ctx.classId, dailyStore.id, date);
       if (sessionResult.created) createdSessions += 1;
     }
-    return { ok: true, storeId: sid(storeResult.store.id), storeName: storeResult.store.name, createdItems, createdSessions };
+    return { ok: true, storeId: sid(dailyStore.id), storeName: dailyStore.name, createdItems, createdSessions };
   },
 
   // 每日菜單專屬介面：依月份列出每天各店家的餐點
@@ -286,6 +286,13 @@ async function findOrCreateStore(classId, name) {
   const existing = await findOne('stores', { name, is_deleted: false }, classId);
   if (existing) return { store: existing, created: false };
   return { store: await insertRow('stores', { class_id: classId, name, sort_order: 0 }), created: true };
+}
+
+// 「每日菜單」合併店家：所有廠商的每日菜單整合到這個店家，每天一個場次
+async function findOrCreateDailyStore(classId) {
+  const existing = await findOne('stores', { name: '每日菜單', is_deleted: false }, classId);
+  if (existing) return existing;
+  return insertRow('stores', { class_id: classId, name: '每日菜單', sort_order: 999 });
 }
 
 async function findOrCreateMenuItem(classId, storeId, name, price, options, menuDate = '1970-01-01', dish = '') {

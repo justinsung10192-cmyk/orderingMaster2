@@ -74,6 +74,8 @@ const ADMIN = new Set([
   'adminDeleteDailyMenu',
   'adminClearDailyMenus',
   'adminCancelOrder',
+  'adminExportBackup',
+  'adminSetDutyExempt',
 ]);
 
 export const config = { api: { bodyParser: false } };

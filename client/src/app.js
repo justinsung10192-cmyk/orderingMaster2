@@ -801,6 +801,14 @@ async function renderAdminDashboard(content) {
               </div>`).join('')}
           </div>` : ''}
                 ${data.overdueCount ? `<button data-action="view-overdue" class="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600">⚠️ 有 ${data.overdueCount} 位同學尚未繳費，點此查看</button>` : ''}
+        ${data.dutyStudents.length ? `
+          <div class="rounded-2xl bg-gradient-to-r from-stamp to-ledger p-4 text-white shadow-paper">
+            <p class="text-[11px] font-bold tracking-[.13em] text-white/70">TODAY'S DUTY</p>
+            <h3 class="font-serif text-lg font-black">今日值日生</h3>
+            <div class="mt-2 flex flex-wrap gap-2">
+              ${data.dutyStudents.map((u) => `<span class="rounded-full bg-white/20 px-3 py-1 text-sm font-bold">${escapeHtml(u.seatNo)} ${escapeHtml(u.name)}</span>`).join('')}
+            </div>
+          </div>` : ''}
 
         ${data.sessionStats.length ? data.sessionStats.map((session) => `
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
@@ -1112,6 +1120,7 @@ async function renderAdminUsers(content) {
               <div class="flex gap-1.5">
                 ${user.role === 'Admin' ? `<button data-action="demote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-ledger">移除管理</button>` : `<button data-action="promote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">設為管理</button>`}
                 <button data-action="toggle-user" data-user="${user.id}" data-disabled="${user.isDisabled}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.isDisabled ? 'text-stamp' : 'text-slate-500'}">${user.isDisabled ? '啟用' : '停用'}</button>
+                <button data-action="toggle-duty" data-user="${user.id}" data-duty="${user.dutyExempt}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.dutyExempt ? 'text-stamp' : 'text-slate-500'}">${user.dutyExempt ? '恢復值日' : '免值日'}</button>
                 <button data-action="topup" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">儲值</button>
                 <button data-action="reset-pw" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">重設密碼</button>
                 <button data-action="del-user" data-user="${user.id}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">刪除</button>
@@ -1165,6 +1174,12 @@ function renderSettingsHtml(content) {
         <p class="font-bold text-red-600">欠繳催繳名單</p>
         <p class="mt-0.5 text-xs text-slate-500">顯示所有仍有現金欠款的同學</p>
       </button>
+      <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
+      <div class="rounded-2xl bg-white p-5 shadow-paper ring-1 ring-ledger/5">
+        <h2 class="font-serif text-lg font-black">資料備份</h2>
+        <p class="mt-1 text-xs leading-5 text-slate-500">匯出全部資料（帳號、店家、菜單、場次、訂單、交易、投票等）為 JSON 檔，供異動前備份。</p>
+        <button data-action="export-backup" class="mt-3 w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">下載資料備份</button>
+      </div>
       <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
         <h2 class="font-serif text-lg font-black text-red-600">危險區域</h2>
         <p class="mt-1 text-xs leading-5 text-red-400">刪除所有訂單、交易、場次、投票、放假、店家與菜單，並將所有帳號儲值餘額歸零。帳號本身會保留，此操作無法復原。</p>
@@ -1610,6 +1625,18 @@ async function onClick(event) {
   await handleAction(action, target);
 }
 
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function handleAction(action, target) {
   switch (action) {
     // 學生
@@ -1624,16 +1651,16 @@ async function handleAction(action, target) {
     case 'logout': doLogout(); break;
 
     // 管理員 - 菜單
-    case 'add-store': promptModal('新增店家', [{ name: 'name', label: '店家名稱' }], async (v) => { await api('adminSaveStore', { name: v.name }); await refreshAdmin(); }); break;
+    case 'add-store': promptModal('新增店家', [{ name: 'name', label: '店家名稱' }], async (v) => { await api('adminSaveStore', { name: v.name }); render(); }); break;
     case 'edit-store': {
       const store = state.admin.catalog?.stores?.find((s) => s.storeId === target.getAttribute('data-store'));
-      promptModal('修改店家名稱', [{ name: 'name', label: '店家名稱', value: store?.name }], async (v) => { await api('adminSaveStore', { storeId: store.storeId, name: v.name }); await refreshAdmin(); });
+      promptModal('修改店家名稱', [{ name: 'name', label: '店家名稱', value: store?.name }], async (v) => { await api('adminSaveStore', { storeId: store.storeId, name: v.name }); render(); });
       break;
     }
-    case 'del-store': openConfirm('刪除店家', '刪除後該店家的菜單會隱藏，但既有場次與訂單紀錄仍會保留。確定嗎？', async () => { await api('adminDeleteStore', { storeId: target.getAttribute('data-store') }); toast('店家已刪除。', 'success'); await refreshAdmin(); }); break;
+    case 'del-store': openConfirm('刪除店家', '刪除後該店家的菜單會隱藏，但既有場次與訂單紀錄仍會保留。確定嗎？', async () => { await api('adminDeleteStore', { storeId: target.getAttribute('data-store') }); toast('店家已刪除。', 'success'); render(); }); break;
     case 'add-item': openItemEditor(target.getAttribute('data-store')); break;
     case 'edit-item': openItemEditor(null, target.getAttribute('data-item')); break;
-    case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); await refreshAdmin(); }); break;
+    case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); render(); }); break;
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': openMonthlyScan(); break;
     case 'save-vendor-items': await saveVendorItems(); break;
@@ -1734,6 +1761,12 @@ async function handleAction(action, target) {
       break;
     }
     case 'reset-pw': openConfirm('重設密碼', '將該同學的密碼重設為預設值，下次登入需重新設定。', async () => { await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast('已重設密碼。', 'success'); await refreshAdmin(); }); break;
+    case 'toggle-duty': {
+      const exempt = target.getAttribute('data-duty') === 'true';
+      await withAdminRefresh(async () => { await api('adminSetDutyExempt', { userId: target.getAttribute('data-user'), dutyExempt: !exempt }); toast(exempt ? '已恢復值日。' : '已設為免值日。', 'success'); });
+      break;
+    }
+    case 'reset-pw': openConfirm('重設密碼', '將該同學的密碼重設為預設值，下次登入需重新設定。', async () => { await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast('已重設密碼。', 'success'); await refreshAdmin(); }); break;
     case 'del-user': openConfirm('刪除帳號', '刪除後不可復原（該同學的歷史訂單會保留）。', async () => { await api('adminDeleteUser', { userId: target.getAttribute('data-user') }); await refreshAdmin(); }); break;
 
     // 管理員 - 設定
@@ -1746,6 +1779,7 @@ async function handleAction(action, target) {
     case 'view-overdue': await viewOverdue(); break;
     case 'copy-overdue': await copyOverdue(); break;
     case 'reset-all': openConfirm('刪除所有資料', '這會清除所有訂單、交易、場次、投票、放假、店家與菜單，並歸零儲值餘額。此操作無法復原！', async () => { await api('adminResetAllData'); toast('已刪除所有資料。', 'success'); await refreshAdmin(); }); break;
+    case 'export-backup': await busy(async () => { const r = await api('adminExportBackup'); downloadJson(`訂餐通備份-${r.exportedAt.slice(0, 10)}.json`, r); toast('備份已下載。', 'success'); }); break;
 
     // 總覽
     case 'export-csv': await exportCsv(); break;
@@ -1827,7 +1861,7 @@ async function saveItem(itemId) {
     await busy(async () => {
       await api('adminSaveMenuItem', { storeId, itemId: itemId || undefined, name, price, options });
       closeModal();
-      await refreshAdmin();
+      render();
     });
   } catch (error) {
     toast(error.message, 'error');
@@ -2121,7 +2155,7 @@ async function saveAiItems(storeId) {
       const result = await api('adminBatchSaveMenuItems', { storeId, items });
       closeModal();
       toast(`已寫入 ${result.created} 個品項。`, 'success');
-      await refreshAdmin();
+      render();
     });
   } catch (error) {
     toast(error.message, 'error');

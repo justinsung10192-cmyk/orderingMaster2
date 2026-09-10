@@ -61,6 +61,7 @@ create table if not exists public.users (
   role                 text not null default 'Student',   -- 'Student' | 'Admin'
   wallet_balance       numeric(10,2) not null default 0,
   is_disabled          boolean not null default false,
+  duty_exempt          boolean not null default false,      -- 免值日（值日生輪值略過）
   must_change_password boolean not null default false,    -- 首次登入強制改密碼/姓名
   auth_version         int not null default 0,
   created_at           timestamptz not null default now(),
@@ -69,6 +70,8 @@ create table if not exists public.users (
 );
 create index if not exists idx_users_class on public.users (class_id);
 create index if not exists idx_users_role on public.users (class_id, role);
+
+alter table public.users add column if not exists duty_exempt boolean not null default false;
 
 -- 店家 ----------------------------------------------------------------------
 create table if not exists public.stores (

@@ -24,6 +24,7 @@ export function publicUser(user) {
     walletBalance: num(user.wallet_balance),
     mustChangePassword: Boolean(user.must_change_password),
     isDisabled: Boolean(user.is_disabled),
+    dutyExempt: Boolean(user.duty_exempt),
   };
 }
 
