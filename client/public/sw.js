@@ -8,7 +8,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let data = { title: '班級訂午餐', body: '', url: '/' };
+  let data = { title: '訂餐通', body: '', url: '/' };
   try {
     const parsed = event.data.json();
     data = { ...data, ...parsed };
