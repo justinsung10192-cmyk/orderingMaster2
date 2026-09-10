@@ -501,13 +501,36 @@ function renderMenuItem(item) {
   const quantity = sel?.quantity || 0;
   const optionIndexes = sel?.optionIndexes || [];
   const optionTotal = optionIndexes.reduce((sum, idx) => sum + Number(item.options[idx]?.price || 0), 0);
+  const requiredGroups = new Map();
+  const optional = [];
+  (item.options || []).forEach((opt, idx) => {
+    if (opt.required && opt.group) {
+      if (!requiredGroups.has(opt.group)) requiredGroups.set(opt.group, []);
+      requiredGroups.get(opt.group).push({ ...opt, idx });
+    } else {
+      optional.push({ ...opt, idx });
+    }
+  });
+  const optionBtn = (opt) => {
+    const active = optionIndexes.includes(opt.idx);
+    return `<button data-option="${item.itemId}" data-opt-idx="${opt.idx}" class="rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${active ? 'bg-stamp text-white ring-stamp' : 'bg-mist text-ledger ring-ledger/10'}">${escapeHtml(opt.name)}${Number(opt.price) ? ` +${money(opt.price)}` : ''}</button>`;
+  };
+  const requiredHtml = [...requiredGroups.entries()].map(([group, opts]) => `
+      <div class="mt-2.5">
+        <p class="mb-1.5 text-[10px] font-bold tracking-[.1em] text-stamp">${escapeHtml(group)}（必選）</p>
+        <div class="flex flex-wrap gap-2">${opts.map(optionBtn).join('')}</div>
+      </div>`).join('');
+  const optionalHtml = optional.length ? `
+      <div class="mt-2.5">
+        <p class="mb-1.5 text-[10px] font-bold tracking-[.1em] text-slate-400">加點／備註（可多選）</p>
+        <div class="flex flex-wrap gap-2">${optional.map(optionBtn).join('')}</div>
+      </div>` : '';
   return `
     <div class="mb-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-ledger/5">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <p class="font-bold text-ledger">${escapeHtml(item.name)}${item.dish ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-600">${escapeHtml(item.dish)}</span>` : ''}</p>
           <p class="mt-0.5 text-sm font-bold tabular-nums text-stamp">${fmtMoney(Number(item.price) + optionTotal)}</p>
-          ${item.options.length ? `<p class="mt-0.5 truncate text-xs text-slate-400">${item.options.map((option) => escapeHtml(option.name)).join('、')}</p>` : ''}
         </div>
         <div class="flex items-center gap-2">
           <button data-qty="${item.itemId}" data-delta="-1" class="grid h-8 w-8 place-items-center rounded-lg bg-mist text-lg font-bold text-ledger ${quantity < 1 ? 'opacity-40' : ''}">−</button>
@@ -515,13 +538,7 @@ function renderMenuItem(item) {
           <button data-qty="${item.itemId}" data-delta="1" class="grid h-8 w-8 place-items-center rounded-lg bg-ledger text-lg font-bold text-white">＋</button>
         </div>
       </div>
-      ${item.options.length ? `
-        <div class="mt-3 flex flex-wrap gap-2">
-          ${item.options.map((option, idx) => {
-            const active = optionIndexes.includes(idx);
-            return `<button data-option="${item.itemId}" data-opt-idx="${idx}" class="rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${active ? 'bg-stamp text-white ring-stamp' : 'bg-mist text-ledger ring-ledger/10'}">${escapeHtml(option.name)}${Number(option.price) ? ` +${money(option.price)}` : ''}</button>`;
-          }).join('')}
-        </div>` : ''}
+      ${requiredHtml}${optionalHtml}
     </div>`;
 }
 
@@ -531,6 +548,23 @@ async function submitOrder() {
     .filter(([, sel]) => sel.quantity >= 1)
     .map(([itemId, sel]) => ({ itemId, quantity: sel.quantity, optionIndexes: sel.optionIndexes }));
   if (!selections.length) return toast('請至少選擇一項餐點。', 'error');
+
+  // 必選選項：每組必須擇一
+  for (const item of draft.session.menuItems) {
+    const sel = draft.selections[item.itemId];
+    if (!sel || sel.quantity < 1) continue;
+    const groups = new Map();
+    (item.options || []).forEach((opt, idx) => {
+      if (opt.required && opt.group) {
+        if (!groups.has(opt.group)) groups.set(opt.group, []);
+        groups.get(opt.group).push(idx);
+      }
+    });
+    for (const [group, idxs] of groups) {
+      const picked = idxs.filter((idx) => sel.optionIndexes.includes(idx)).length;
+      if (picked !== 1) return toast(`「${item.name}」的必選選項「${group}」請擇一。`, 'error');
+    }
+  }
 
   try {
     await busy(async () => {
@@ -981,7 +1015,7 @@ function renderStoreFolder(store) {
             <div class="flex items-center justify-between rounded-xl px-2 py-2.5">
               <div class="min-w-0">
                 <p class="text-sm font-bold text-ledger">${escapeHtml(item.name)}${item.menuDate && item.menuDate !== '1970-01-01' ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">${monthDay(item.menuDate)}</span>` : ''}</p>
-                <p class="text-xs text-slate-400">$${money(item.price)}${item.options.length ? ' · ' + escapeHtml(item.options.map((o) => o.name + (Number(o.price) ? `(+${money(o.price)})` : '')).join('、')) : ''}</p>
+                <p class="text-xs text-slate-400">$${money(item.price)}${item.options.length ? ' · ' + escapeHtml(item.options.map((o) => o.name + (Number(o.price) ? `(+${money(o.price)})` : '') + (o.required ? '＊' : '')).join('、')) : ''}</p>
               </div>
               <div class="flex gap-1.5">
                 <button data-action="edit-item" data-item="${item.itemId}" class="rounded-lg bg-mist px-2.5 py-1.5 text-xs font-bold text-ledger">編輯</button>
@@ -1025,14 +1059,14 @@ async function renderAdminDailyMenu(content) {
               <span class="text-xs text-slate-400">${escapeHtml(day.weekday)}</span>
             </div>
             <div class="mt-2 space-y-1.5">
-              ${day.vendors.map((vendor) => `
+              ${day.items.length ? day.items.map((it) => `
                 <div class="flex items-start justify-between rounded-lg bg-mist/50 px-3 py-2">
                   <div class="min-w-0">
-                    <p class="text-sm font-bold text-ledger">${escapeHtml(vendor.storeName)}</p>
-                    <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(vendor.items.map((it) => `${it.name}${it.dish ? `（${it.dish}）` : ''} $${money(it.price)}`).join('、'))}</p>
+                    <p class="text-sm font-bold text-ledger">${escapeHtml(it.name)}${it.dish ? `<span class="text-xs text-slate-400">（${escapeHtml(it.dish)}）</span>` : ''}</p>
+                    <p class="mt-0.5 text-xs text-slate-500">$${money(it.price)}</p>
                   </div>
-                  <button data-action="del-daily" data-date="${day.date}" data-store="${vendor.storeId}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
-                </div>`).join('')}
+                  <button data-action="del-daily-item" data-item="${it.itemId}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600">刪除</button>
+                </div>`).join('') : '<p class="text-xs text-slate-400">當天無餐點。</p>'}
             </div>
           </div>`).join('') : '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">這個月尚無每日菜單，點「＋ 上傳菜單」開始匯入。</p>'}
       </div>`;
@@ -1654,8 +1688,22 @@ async function onClick(event) {
     const optIdx = Number(target.getAttribute('data-opt-idx'));
     const sel = state.orderDraft.selections[option] || { quantity: 1, optionIndexes: [] };
     if (sel.quantity < 1) sel.quantity = 1;
+    const item = state.orderDraft.session.menuItems.find((it) => it.itemId === option);
+    const opt = item?.options?.[optIdx];
     const idx = sel.optionIndexes.indexOf(optIdx);
-    if (idx >= 0) sel.optionIndexes.splice(idx, 1); else sel.optionIndexes.push(optIdx);
+    if (idx >= 0) {
+      sel.optionIndexes.splice(idx, 1);
+    } else {
+      if (opt?.required && opt.group) {
+        item.options.forEach((o, i) => {
+          if (i !== optIdx && o.required && o.group === opt.group) {
+            const j = sel.optionIndexes.indexOf(i);
+            if (j >= 0) sel.optionIndexes.splice(j, 1);
+          }
+        });
+      }
+      sel.optionIndexes.push(optIdx);
+    }
     state.orderDraft.selections[option] = sel;
     renderOrderSheet();
     return;
@@ -1770,7 +1818,7 @@ async function handleAction(action, target) {
     case 'ai-scan': openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': openMonthlyScan(); break;
     case 'save-vendor-items': await saveVendorItems(); break;
-    case 'del-daily': openConfirm('刪除當天菜單', '會刪除該店家當天的品項並將場次標記刪除，確定嗎？', async () => { await api('adminDeleteDailyMenu', { date: target.getAttribute('data-date'), storeId: target.getAttribute('data-store') }); toast('已刪除。', 'success'); await refreshAdmin(); }); break;
+    case 'del-daily-item': openConfirm('刪除此品項', '將刪除此每日菜單品項，確定嗎？', async () => { await api('adminDeleteDailyMenuItem', { itemId: target.getAttribute('data-item') }); toast('已刪除。', 'success'); await refreshAdmin(); }); break;
     case 'clear-daily': { const month = state.admin.dailyMonth || todayString().slice(0, 7); openConfirm('一鍵刪除每日菜單', `將刪除 ${month} 月所有每日菜單（品項與對應場次），確定嗎？`, async () => { const r = await api('adminClearDailyMenus', { month }); toast(`已刪除 ${r.deletedItems} 個品項、${r.deletedSessions} 個場次${r.refundedOrders ? `、退款 ${r.refundedOrders} 筆訂單` : ''}。`, 'success'); await refreshAdmin(); }); break; }
     case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
     case 'del-monthly-item': { const ei = Number(target.getAttribute('data-index')); const ii = Number(target.getAttribute('data-item')); const entry = state.monthlyEntries[ei]; if (entry?.items) { entry.items.splice(ii, 1); renderMonthlyList(); } break; }
@@ -1952,7 +2000,10 @@ function openItemEditor(storeId, itemId) {
     item = store?.items?.find((it) => it.itemId === itemId);
     resolvedStoreId = store?.storeId;
   }
-  const optionsText = (item?.options || []).map((opt) => `${opt.name}${Number(opt.price) ? `:${opt.price}` : ''}`).join('\n');
+  const optionsText = (item?.options || []).map((opt) => {
+    const base = `${opt.name}${Number(opt.price) ? `:${opt.price}` : ''}`;
+    return opt.required && opt.group ? `${base}:${opt.group}` : base;
+  }).join('\n');
 
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
@@ -1967,8 +2018,8 @@ function openItemEditor(storeId, itemId) {
           <input id="item-name" value="${escapeHtml(item?.name || '')}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" placeholder="例如 火腿蛋吐司" />
           <label class="mb-1 block text-xs font-bold text-slate-500">價格（元）</label>
           <input id="item-price" type="number" inputmode="decimal" value="${item ? item.price : ''}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" placeholder="例如 45" />
-          <label class="mb-1 block text-xs font-bold text-slate-500">客製選項（每行一個；加價用「名稱:價格」，例如 加起司:10）</label>
-          <textarea id="item-options" rows="4" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="無糖&#10;半糖&#10;加珍珠:10">${escapeHtml(optionsText)}</textarea>
+          <label class="mb-1 block text-xs font-bold text-slate-500">選項（每行一個；加價用「名稱:價格」；必選（擇一）用「名稱:價格:群組」）</label>
+          <textarea id="item-options" rows="4" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="可選：加珍珠:10&#10;必選：大:10:大小&#10;必選：小:0:大小">${escapeHtml(optionsText)}</textarea>
         </div>
         <div class="border-t border-ledger/10 bg-white px-5 py-4">
           <button data-action="save-item" data-item="${itemId || ''}" class="w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲存品項</button>
@@ -1981,9 +2032,13 @@ async function saveItem(itemId) {
   const name = $('#item-name').value.trim();
   const price = Number($('#item-price').value || 0);
   const options = $('#item-options').value.split('\n').map((line) => {
-    const [n, p] = line.trim().split(':');
-    return { name: n.trim(), price: Number(p || 0) };
-  }).filter((opt) => opt.name);
+    const parts = line.trim().split(':');
+    const name = (parts[0] || '').trim();
+    const price = Number(parts[1] || 0);
+    const group = (parts.slice(2).join(':') || '').trim();
+    if (!name) return null;
+    return group ? { name, price, required: true, group } : { name, price, required: false, group: '' };
+  }).filter(Boolean);
   const storeId = $('#item-store').value;
   try {
     await busy(async () => {
@@ -2259,7 +2314,7 @@ function showAiPreview(storeId, items) {
     </div>`;
   state.aiItems = items.map((item) => ({
     ...item,
-    options: (item.options || []).map((opt) => (typeof opt === 'string' ? { name: opt, price: 0 } : { name: opt.name || '', price: Number(opt.price) || 0 })),
+    options: (item.options || []).map((opt) => (typeof opt === 'string' ? { name: opt, price: 0, required: false, group: '' } : { name: opt.name || '', price: Number(opt.price) || 0, required: Boolean(opt.required), group: String(opt.group || '') })),
   }));
   renderAiList();
 }
@@ -2277,8 +2332,10 @@ function renderAiList() {
         <div class="mt-2 space-y-1.5">
           ${item.options.map((opt, oi) => `
             <div class="flex items-center gap-1.5">
-              <input data-ai-opt-name="${index}-${oi}" value="${escapeHtml(opt.name || '')}" placeholder="選項（如 大、加辣）" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
-              <input data-ai-opt-price="${index}-${oi}" type="number" inputmode="decimal" value="${opt.price || 0}" placeholder="加價" class="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+              <label class="flex shrink-0 items-center gap-1 text-[10px] font-bold ${opt.required ? 'text-stamp' : 'text-slate-400'}"><input type="checkbox" data-ai-opt-req="${index}-${oi}" ${opt.required ? 'checked' : ''} class="h-3.5 w-3.5 accent-stamp" />必選</label>
+              <input data-ai-opt-name="${index}-${oi}" value="${escapeHtml(opt.name || '')}" placeholder="選項" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+              <input data-ai-opt-price="${index}-${oi}" type="number" inputmode="decimal" value="${opt.price || 0}" placeholder="加價" class="w-14 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+              ${opt.required ? `<input data-ai-opt-group="${index}-${oi}" value="${escapeHtml(opt.group || '')}" placeholder="群組" class="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />` : ''}
               <button data-action="del-ai-opt" data-index="${index}" data-opt="${oi}" class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-xs text-slate-400">×</button>
             </div>`).join('')}
         </div>` : ''}
@@ -2309,6 +2366,20 @@ function bindAiEditors(list) {
       if (opt) opt.price = Number(el.value || 0);
     });
   });
+  list.querySelectorAll('[data-ai-opt-req]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const [i, oi] = pair(el.getAttribute('data-ai-opt-req'));
+      const opt = state.aiItems[i]?.options?.[oi];
+      if (opt) { opt.required = el.checked; if (el.checked && !opt.group) opt.group = '必選'; renderAiList(); }
+    });
+  });
+  list.querySelectorAll('[data-ai-opt-group]').forEach((el) => {
+    el.addEventListener('input', () => {
+      const [i, oi] = pair(el.getAttribute('data-ai-opt-group'));
+      const opt = state.aiItems[i]?.options?.[oi];
+      if (opt) opt.group = el.value;
+    });
+  });
 }
 
 async function saveAiItems(storeId) {
@@ -2317,7 +2388,7 @@ async function saveAiItems(storeId) {
       name: String(item.name || '').trim(),
       price: Number(item.price) || 0,
       options: (item.options || [])
-        .map((opt) => ({ name: String(opt.name || '').trim(), price: Number(opt.price) || 0 }))
+        .map((opt) => ({ name: String(opt.name || '').trim(), price: Number(opt.price) || 0, required: Boolean(opt.required), group: opt.required ? (String(opt.group || '').trim() || '必選') : '' }))
         .filter((opt) => opt.name),
     }))
     .filter((item) => item.name);

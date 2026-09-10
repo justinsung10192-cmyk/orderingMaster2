@@ -72,6 +72,7 @@ const ADMIN = new Set([
   'adminImportVendorMenu',
   'adminGetDailyMenus',
   'adminDeleteDailyMenu',
+  'adminDeleteDailyMenuItem',
   'adminClearDailyMenus',
   'adminCancelOrder',
   'adminGetOrderContext',

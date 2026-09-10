@@ -8,6 +8,8 @@ function normalizeOptions(options) {
     .map((option) => ({
       name: String(option?.name || '').trim(),
       price: num(option?.price),
+      required: Boolean(option?.required),
+      group: String(option?.group || ''),
     }))
     .filter((option) => option.name)
     .slice(0, 30);
@@ -39,6 +41,8 @@ export const actions = {
           options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
             name: option.name,
             price: num(option.price),
+            required: Boolean(option.required),
+            group: String(option.group || ''),
           })),
           isActive: Boolean(item.is_active),
         })),
@@ -210,21 +214,16 @@ export const actions = {
       if (!byDate.has(item.menu_date)) byDate.set(item.menu_date, []);
       byDate.get(item.menu_date).push(item);
     }
+    // 全部集中顯示於「內訂」：非內訂店家的品項自動加「廠商-」前綴
     const days = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, items]) => {
-      const byStore = new Map();
-      for (const item of items) {
-        if (!byStore.has(String(item.store_id))) byStore.set(String(item.store_id), []);
-        byStore.get(String(item.store_id)).push(item);
-      }
-      return {
-        date,
-        weekday: weekdayName(date),
-        vendors: [...byStore.entries()].map(([storeIdStr, storeItems]) => ({
-          storeId: storeIdStr,
-          storeName: storeById.get(storeIdStr)?.name || '未命名店家',
-          items: storeItems.map((item) => ({ itemId: sid(item.id), name: item.name, dish: item.dish || '', price: num(item.price) })),
-        })),
-      };
+      const list = items
+        .map((item) => {
+          const storeName = storeById.get(String(item.store_id))?.name || '未命名店家';
+          const name = storeName === '內訂' ? item.name : `${storeName}-${item.name}`;
+          return { itemId: sid(item.id), storeId: String(item.store_id), name, dish: item.dish || '', price: num(item.price) };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+      return { date, weekday: weekdayName(date), items: list };
     });
     return { month, days };
   },
@@ -240,6 +239,14 @@ export const actions = {
     if (session && !session.is_deleted) {
       await callRpc('fn_delete_session_and_refund', { p_class_id: ctx.classId, p_session_id: session.id });
     }
+    return { ok: true };
+  },
+
+  // 刪除單一每日菜單品項
+  async adminDeleteDailyMenuItem(data, ctx) {
+    const item = await findOne('menu_items', { id: Number(data.itemId) }, ctx.classId);
+    if (!item) throw appError('NOT_FOUND', '找不到此品項。');
+    await deleteRows('menu_items', { id: item.id });
     return { ok: true };
   },
 

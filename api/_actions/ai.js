@@ -4,16 +4,18 @@
 //   2) 每月菜單：學校內訂菜單，每天日期＋店家＋品項（aiRecognizeMonthlyMenu，每月更新）
 import { appError, num, round2 } from '../_lib/util.js';
 
-const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的所有「品項名稱」與「價格」。
+const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的「所有」品項（一個都不能漏、不能省略），並標出每個品項的價格與選項。
 規則：
 1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
 2. 每個品項是一個物件，格式為：
-   {"name":"品項名稱","price":數字,"options":["選項1","選項2"]}
-3. price 必須是數字（新台幣元，整數或小數皆可），無法辨識價格時填 0。
-4. options 是該品項可選擇的客製選項（如大小份、甜度、冰塊、加料、辣度、加飯、加辣、不加蔥等備註）的字串陣列；沒有選項時為空陣列 []。
-5. 若同一種餐點有不同大小（如「便當(大)」「便當(小)」），請分別列為獨立品項並各自標價，系統會自動整併成單一品項。
-6. 忽略照片中的標語、電話、地址等非菜單內容。
-7. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
+   {"name":"品項名稱","price":數字,"required":[{"group":"群組名","options":[{"name":"選項","price":加價}]}],"optional":[{"name":"選項","price":加價}]}
+3. price 是該品項的「基準價」（新台幣元；有大小份時填最小份的價格）。無法辨識價格時填 0。
+4. required 是「必選」選項群組：每個群組只能擇一（例如：大小、甜度、冰塊、辣度、口味、主菜）。群組內 options 的 price 是「相對基準價的加價」，基準選項填 0。若菜單把「便當(大)」「便當(小)」分開列，請整併成一個「便當」，把大小放進 required 的「大小」群組。
+5. optional 是「可選」的加價或備註（可多選），例如加飯、加辣、加滷蛋、不加蔥；price 是加價金額（不加價填 0）。
+6. 沒有選項時，required 與 optional 都填空陣列 []。
+7. 每個品項的選項都是獨立、互不共用的（不要跨品項共用選項）。
+8. 忽略照片中的標語、電話、地址等非菜單內容。
+9. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
 
 function monthlyPrompt(month) {
   const [year, mon] = month.split('-');
@@ -30,27 +32,55 @@ function monthlyPrompt(month) {
 8. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
 }
 
-// 選項正規化：字串（備註）轉為 {name, price}，物件則保留加價
-function normalizeOptions(options) {
-  return (Array.isArray(options) ? options : [])
-    .map((option) => {
-      if (typeof option === 'string') return { name: option.trim(), price: 0 };
-      return { name: String(option?.name || '').trim(), price: num(option?.price) };
-    })
-    .filter((option) => option.name)
-    .slice(0, 30);
+// 選項正規化：支援新格式（required 群組 + optional）與舊格式（options 扁平陣列）
+// 一律輸出扁平陣列 [{name, price, required, group}]；required=true 表示必選（同 group 內擇一）
+function normalizeItemOptions(item) {
+  const out = [];
+  // 必選群組
+  const required = Array.isArray(item?.required) ? item.required : [];
+  for (const g of required) {
+    const group = String(g?.group || '').trim() || '必選';
+    const opts = Array.isArray(g?.options) ? g.options : [];
+    for (const o of opts) {
+      const name = String(o?.name || '').trim();
+      if (!name) continue;
+      out.push({ name, price: num(o?.price), required: true, group });
+    }
+  }
+  // 可選
+  const optional = Array.isArray(item?.optional) ? item.optional : [];
+  for (const o of optional) {
+    const name = String(o?.name || '').trim();
+    if (!name) continue;
+    out.push({ name, price: num(o?.price), required: false, group: '' });
+  }
+  // 舊格式 options（字串或物件陣列）
+  const legacy = Array.isArray(item?.options) ? item.options : [];
+  for (const o of legacy) {
+    if (typeof o === 'string') {
+      const name = o.trim();
+      if (name) out.push({ name, price: 0, required: false, group: '' });
+      continue;
+    }
+    const name = String(o?.name || '').trim();
+    if (!name) continue;
+    out.push({ name, price: num(o?.price), required: Boolean(o?.required), group: String(o?.group || '') });
+  }
+  return out.slice(0, 30);
 }
 
 function normalizeItems(parsed) {
-  const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
+  const list = Array.isArray(parsed)
+    ? parsed
+    : (Array.isArray(parsed?.items) ? parsed.items : (Array.isArray(parsed?.menu) ? parsed.menu : (Array.isArray(parsed?.dishes) ? parsed.dishes : [])));
   return list
     .map((item) => ({
       name: String(item?.name || '').trim(),
       price: num(item?.price),
-      options: normalizeOptions(item?.options),
+      options: normalizeItemOptions(item),
     }))
     .filter((item) => item.name)
-    .slice(0, 100);
+    .slice(0, 150);
 }
 
 // 大小變體偵測：'便當(大)'、'便當（小）'、'便當大'、'炒飯 加大' 等
@@ -62,7 +92,7 @@ function parseSizeVariant(name) {
   return { base: match[1].trim(), size: match[2] };
 }
 
-// 將「便當(大)」「便當(小)」等大小變體整併為單一品項，附帶大小選項（大份加價）
+// 將「便當(大)」「便當(小)」等大小變體整併為單一品項；大小選項為必選（群組「大小」）
 function mergeSizeVariants(items) {
   const groups = new Map(); // base name -> [{ item, size }]
   const standalone = [];
@@ -83,22 +113,24 @@ function mergeSizeVariants(items) {
     const sizeOptions = entries
       .slice()
       .sort((a, b) => num(a.item.price) - num(b.item.price))
-      .map((entry) => ({ name: entry.size, price: round2(num(entry.item.price) - basePrice) }));
-    // 合併各變體各自的備註選項（去重）
-    const noteOptions = [];
+      .map((entry) => ({ name: entry.size, price: round2(num(entry.item.price) - basePrice), required: true, group: '大小' }));
+    // 合併各變體各自的選項（去重；保留其 required/group）
+    const extra = [];
     const seen = new Set();
     for (const entry of entries) {
       for (const option of (entry.item.options || [])) {
         const name = typeof option === 'string' ? option : String(option?.name || '').trim();
         const price = typeof option === 'string' ? 0 : num(option?.price);
+        const required = typeof option !== 'string' && Boolean(option?.required);
+        const group = typeof option !== 'string' ? String(option?.group || '') : '';
         if (!name) continue;
-        const key = `${name}:${price}`;
+        const key = `${name}:${price}:${required}:${group}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        noteOptions.push({ name, price });
+        extra.push({ name, price, required, group });
       }
     }
-    out.push({ name: base, price: basePrice, options: [...sizeOptions, ...noteOptions] });
+    out.push({ name: base, price: basePrice, options: [...sizeOptions, ...extra] });
   }
   return out;
 }

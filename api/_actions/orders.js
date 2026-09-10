@@ -184,7 +184,7 @@ export const actions = {
         walletBalance: num(user.wallet_balance),
         menuItems: menuItems.map((item) => ({
           ...item,
-          options: item.options.map((option, index) => ({ index, name: option.name, price: num(option.price) })),
+          options: item.options.map((option, index) => ({ index, name: option.name, price: num(option.price), required: Boolean(option.required), group: String(option.group || '') })),
         })),
         existingOrder: existing ? publicOrder(existing) : null,
       },

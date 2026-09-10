@@ -87,9 +87,9 @@ async function loadDaySummary(classId, date) {
     const itemMap = new Map();
     sessionOrders.forEach((order) => {
       orderItems(order).forEach((item) => {
-        const optKey = (item.options || []).map((option) => option.name).join('、');
+        const optKey = (item.options || []).map((option) => option.name).sort().join('、');
         const key = `${item.itemName}|||${optKey}`;
-        const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name), quantity: 0 };
+        const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name).sort(), quantity: 0 };
         entry.quantity += Number(item.quantity) || 0;
         itemMap.set(key, entry);
       });
@@ -120,9 +120,9 @@ async function loadDaySummary(classId, date) {
   const itemMap = new Map();
   orders.forEach((order) => {
     orderItems(order).forEach((item) => {
-      const optKey = (item.options || []).map((option) => option.name).join('、');
+      const optKey = (item.options || []).map((option) => option.name).sort().join('、');
       const key = `${item.itemName}|||${optKey}`;
-      const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name), quantity: 0 };
+      const entry = itemMap.get(key) || { name: item.itemName, options: (item.options || []).map((option) => option.name).sort(), quantity: 0 };
       entry.quantity += Number(item.quantity) || 0;
       itemMap.set(key, entry);
     });

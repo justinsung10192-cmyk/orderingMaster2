@@ -85,6 +85,18 @@ export function computeOrderItems(menuItems, selections) {
     const optionIndexes = Array.isArray(selection?.optionIndexes) ? selection.optionIndexes.map(Number) : [];
     if (new Set(optionIndexes).size !== optionIndexes.length) throw new Error('客製選項不可重複選擇。');
     const options = Array.isArray(item.options) ? item.options : [];
+    // 必選群組：每組必須恰好選擇一項
+    const requiredGroups = new Map();
+    options.forEach((option, idx) => {
+      if (option && option.required && option.group) {
+        if (!requiredGroups.has(option.group)) requiredGroups.set(option.group, []);
+        requiredGroups.get(option.group).push(idx);
+      }
+    });
+    for (const [group, idxs] of requiredGroups) {
+      const picked = idxs.filter((idx) => optionIndexes.includes(idx)).length;
+      if (picked !== 1) throw new Error(`「${item.name}」的必選選項「${group}」請擇一。`);
+    }
     const chosen = optionIndexes.map((idx) => {
       const option = options[idx];
       if (!option) throw new Error('客製選項資料不正確。');
@@ -124,6 +136,8 @@ export async function loadSessionWithMenu(session) {
         index,
         name: option.name,
         price: num(option.price),
+        required: Boolean(option.required),
+        group: String(option.group || ''),
       })),
     })),
   };
@@ -191,7 +205,7 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
         name: item.name,
         dish: item.dish || '',
         price: num(item.price),
-        options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price) })),
+        options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price), required: Boolean(option.required), group: String(option.group || '') })),
       }));
     result.push(publicSession(session, store?.name || '未命名店家', menuItems, existingOrder, pureBalanceMode, user.wallet_balance));
   }
