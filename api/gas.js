@@ -76,6 +76,9 @@ const ADMIN = new Set([
   'adminCancelOrder',
   'adminExportBackup',
   'adminSetDutyExempt',
+  'adminSetDuty',
+  'adminClearDuty',
+  'adminRestoreBackup',
 ]);
 
 export const config = { api: { bodyParser: false } };

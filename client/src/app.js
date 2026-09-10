@@ -801,14 +801,23 @@ async function renderAdminDashboard(content) {
               </div>`).join('')}
           </div>` : ''}
                 ${data.overdueCount ? `<button data-action="view-overdue" class="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600">⚠️ 有 ${data.overdueCount} 位同學尚未繳費，點此查看</button>` : ''}
-        ${data.dutyStudents.length ? `
+                ${data.dutyStudents.length ? `
           <div class="rounded-2xl bg-gradient-to-r from-stamp to-ledger p-4 text-white shadow-paper">
-            <p class="text-[11px] font-bold tracking-[.13em] text-white/70">TODAY'S DUTY</p>
-            <h3 class="font-serif text-lg font-black">今日值日生</h3>
-            <div class="mt-2 flex flex-wrap gap-2">
-              ${data.dutyStudents.map((u) => `<span class="rounded-full bg-white/20 px-3 py-1 text-sm font-bold">${escapeHtml(u.seatNo)} ${escapeHtml(u.name)}</span>`).join('')}
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-[11px] font-bold tracking-[.13em] text-white/70">TODAY'S DUTY</p>
+                <h3 class="font-serif text-lg font-black">今日值日生</h3>
+              </div>
+              <button data-action="set-duty" data-date="${data.date}" class="rounded-lg bg-white/20 px-2.5 py-1.5 text-[11px] font-bold text-white">設定值日生</button>
             </div>
-          </div>` : ''}
+            <div class="mt-2 flex flex-wrap gap-2">
+              ${data.dutyStudents.map((u) => `<span class="rounded-full bg-white/20 px-3 py-1 text-sm font-bold">${escapeHtml(u.seatNo)} ${escapeHtml(u.name)}${u.manual ? ' · 手動' : ''}</span>`).join('')}
+            </div>
+          </div>` : `
+          <div class="flex items-center justify-between rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+            <p class="text-sm font-bold text-slate-500">今日放假或尚無值日生</p>
+            <button data-action="set-duty" data-date="${data.date}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-ledger">設定值日生</button>
+          </div>`}
 
         ${data.sessionStats.length ? data.sessionStats.map((session) => `
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
@@ -1179,6 +1188,7 @@ function renderSettingsHtml(content) {
         <h2 class="font-serif text-lg font-black">資料備份</h2>
         <p class="mt-1 text-xs leading-5 text-slate-500">匯出全部資料（帳號、店家、菜單、場次、訂單、交易、投票等）為 JSON 檔，供異動前備份。</p>
         <button data-action="export-backup" class="mt-3 w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">下載資料備份</button>
+        <button data-action="restore-backup" class="mt-2 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">還原資料（上傳備份檔）</button>
       </div>
       <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
         <h2 class="font-serif text-lg font-black text-red-600">危險區域</h2>
@@ -1364,7 +1374,7 @@ function openScanner() {
     state.scanner = new window.Html5Qrcode('qr-reader');
     state.scanner.start(
       { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 220, height: 220 } },
+      { fps: 15, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0, rememberLastUsedCamera: true },
       onScanSuccess,
       () => {},
     ).catch(() => {
@@ -1560,6 +1570,7 @@ async function onClick(event) {
     if (nav === 'settings' && !state.user) return;
     state.view = nav;
     if (nav === 'admin') state.adminTab = 'dashboard';
+    render();
     refreshBoot()
       .then(() => { if (state.view === nav && state.user) render(); })
       .catch(() => {});
@@ -1635,6 +1646,61 @@ function downloadJson(filename, data) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+async function openDutyEditor(date) {
+  const res = await api('adminListUsers');
+  const eligible = res.users.filter((u) => u.role !== 'Admin');
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+        <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">DUTY SETUP</p><h2 class="font-serif text-xl font-black">設定值日生（${date}）</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="flex-1 overflow-y-auto px-4 py-4">
+          <p class="mb-2 text-xs leading-5 text-slate-500">勾選要指派的值日生（不勾選任何一人並儲存＝清除手動指派、回到自動輪值）：</p>
+          <div class="space-y-1.5">
+            ${eligible.map((u) => `<label class="flex items-center gap-2 rounded-lg bg-mist/50 px-3 py-2"><input type="checkbox" value="${u.id}" class="h-4 w-4 accent-stamp"><span class="text-sm font-bold text-ledger">${escapeHtml(u.seatNo)} ${escapeHtml(u.name)}</span>${u.dutyExempt ? '<span class="ml-1 text-[10px] text-slate-400">免值日</span>' : ''}</label>`).join('')}
+          </div>
+        </div>
+        <div class="border-t border-ledger/10 px-5 py-4">
+          <button id="save-duty" class="w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲存</button>
+        </div>
+      </section>
+    </div>`;
+  $('#save-duty').addEventListener('click', async () => {
+    const userIds = [...modalRoot.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.value);
+    await busy(async () => {
+      if (userIds.length) await api('adminSetDuty', { date, userIds });
+      else await api('adminClearDuty', { date });
+      closeModal();
+      toast('值日生已更新。', 'success');
+      render();
+    });
+  });
+}
+
+function openRestoreModal() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json';
+  input.onchange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      await busy(async () => {
+        const r = await api('adminRestoreBackup', { backup });
+        toast(`已還原：${r.usersRestored} 個帳號、${r.storesRestored} 個店家（訂單/場次為暫時資料，未還原）。`, 'success');
+        await refreshAdmin();
+      });
+    } catch (error) {
+      toast('還原失敗：' + error.message, 'error');
+    }
+  };
+  input.click();
 }
 
 async function handleAction(action, target) {
@@ -1766,6 +1832,7 @@ async function handleAction(action, target) {
       await withAdminRefresh(async () => { await api('adminSetDutyExempt', { userId: target.getAttribute('data-user'), dutyExempt: !exempt }); toast(exempt ? '已恢復值日。' : '已設為免值日。', 'success'); });
       break;
     }
+    case 'set-duty': await openDutyEditor(target.getAttribute('data-date') || state.admin.dashboardDate); break;
     case 'reset-pw': openConfirm('重設密碼', '將該同學的密碼重設為預設值，下次登入需重新設定。', async () => { await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast('已重設密碼。', 'success'); await refreshAdmin(); }); break;
     case 'del-user': openConfirm('刪除帳號', '刪除後不可復原（該同學的歷史訂單會保留）。', async () => { await api('adminDeleteUser', { userId: target.getAttribute('data-user') }); await refreshAdmin(); }); break;
 
@@ -1780,6 +1847,7 @@ async function handleAction(action, target) {
     case 'copy-overdue': await copyOverdue(); break;
     case 'reset-all': openConfirm('刪除所有資料', '這會清除所有訂單、交易、場次、投票、放假、店家與菜單，並歸零儲值餘額。此操作無法復原！', async () => { await api('adminResetAllData'); toast('已刪除所有資料。', 'success'); await refreshAdmin(); }); break;
     case 'export-backup': await busy(async () => { const r = await api('adminExportBackup'); downloadJson(`訂餐通備份-${r.exportedAt.slice(0, 10)}.json`, r); toast('備份已下載。', 'success'); }); break;
+    case 'restore-backup': openRestoreModal(); break;
 
     // 總覽
     case 'export-csv': await exportCsv(); break;

@@ -7,18 +7,17 @@ import { sendPushToUser } from '../_lib/push.js';
 const VERIFY_MINUTES = 5;
 
 async function resolveContext(classId, userId) {
-  const [student, allOrdersRaw] = await Promise.all([
+  const [student, allOrdersRaw, allStores] = await Promise.all([
     findOne('users', { id: Number(userId) }, classId),
     listRows('orders', { classId, filters: { user_id: Number(userId) } }),
+    listRows('stores', { classId }),
   ]);
   if (!student) throw appError('NOT_FOUND', '找不到學生帳號。');
   const allOrders = allOrdersRaw.filter((order) => !order.is_deleted);
   const sessionIds = [...new Set(allOrders.map((order) => order.session_id))];
   const sessions = sessionIds.length ? await listRowsIn('sessions', 'id', sessionIds, { classId }) : [];
   const sessionById = new Map(sessions.map((session) => [String(session.id), session]));
-  const storeIds = [...new Set(sessions.map((session) => session.store_id))];
-  const stores = storeIds.length ? await listRowsIn('stores', 'id', storeIds, { classId }) : [];
-  const storeById = new Map(stores.map((store) => [String(store.id), store]));
+  const storeById = new Map((allStores || []).map((store) => [String(store.id), store]));
 
   const today = todayString();
   const todayOrders = [];
