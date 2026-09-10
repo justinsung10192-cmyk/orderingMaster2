@@ -74,6 +74,8 @@ const ADMIN = new Set([
   'adminDeleteDailyMenu',
   'adminClearDailyMenus',
   'adminCancelOrder',
+  'adminGetOrderContext',
+  'adminEditOrder',
   'adminExportBackup',
   'adminSetDutyExempt',
   'adminSetDuty',

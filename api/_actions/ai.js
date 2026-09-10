@@ -2,7 +2,7 @@
 // 兩種模式：
 //   1) 店家菜單：單一店家的品項與價格（aiRecognizeMenu）
 //   2) 每月菜單：學校內訂菜單，每天日期＋店家＋品項（aiRecognizeMonthlyMenu，每月更新）
-import { appError, num } from '../_lib/util.js';
+import { appError, num, round2 } from '../_lib/util.js';
 
 const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的所有「品項名稱」與「價格」。
 規則：
@@ -10,9 +10,10 @@ const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上�
 2. 每個品項是一個物件，格式為：
    {"name":"品項名稱","price":數字,"options":["選項1","選項2"]}
 3. price 必須是數字（新台幣元，整數或小數皆可），無法辨識價格時填 0。
-4. options 是該品項可選擇的客製選項（如甜度、冰塊、加料、辣度等）的字串陣列；沒有選項時為空陣列 []。
-5. 忽略照片中的標語、電話、地址等非菜單內容。
-6. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
+4. options 是該品項可選擇的客製選項（如大小份、甜度、冰塊、加料、辣度、加飯、加辣、不加蔥等備註）的字串陣列；沒有選項時為空陣列 []。
+5. 若同一種餐點有不同大小（如「便當(大)」「便當(小)」），請分別列為獨立品項並各自標價，系統會自動整併成單一品項。
+6. 忽略照片中的標語、電話、地址等非菜單內容。
+7. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
 
 function monthlyPrompt(month) {
   const [year, mon] = month.split('-');
@@ -29,16 +30,77 @@ function monthlyPrompt(month) {
 8. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
 }
 
+// 選項正規化：字串（備註）轉為 {name, price}，物件則保留加價
+function normalizeOptions(options) {
+  return (Array.isArray(options) ? options : [])
+    .map((option) => {
+      if (typeof option === 'string') return { name: option.trim(), price: 0 };
+      return { name: String(option?.name || '').trim(), price: num(option?.price) };
+    })
+    .filter((option) => option.name)
+    .slice(0, 30);
+}
+
 function normalizeItems(parsed) {
   const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
   return list
     .map((item) => ({
       name: String(item?.name || '').trim(),
       price: num(item?.price),
-      options: (Array.isArray(item?.options) ? item.options : []).map((option) => String(option).trim()).filter(Boolean).slice(0, 30),
+      options: normalizeOptions(item?.options),
     }))
     .filter((item) => item.name)
     .slice(0, 100);
+}
+
+// 大小變體偵測：'便當(大)'、'便當（小）'、'便當大'、'炒飯 加大' 等
+const SIZE_RE = /^(.+?)[\s]*[（(]?\s*(特大|加大|大份|中份|小份|大杯|中杯|小杯|大碗|中碗|小碗|大|中|小)\s*[）)]?$/;
+
+function parseSizeVariant(name) {
+  const match = SIZE_RE.exec(name);
+  if (!match || !match[1].trim()) return null;
+  return { base: match[1].trim(), size: match[2] };
+}
+
+// 將「便當(大)」「便當(小)」等大小變體整併為單一品項，附帶大小選項（大份加價）
+function mergeSizeVariants(items) {
+  const groups = new Map(); // base name -> [{ item, size }]
+  const standalone = [];
+  for (const item of items) {
+    const parsed = parseSizeVariant(item.name);
+    if (!parsed) { standalone.push(item); continue; }
+    if (!groups.has(parsed.base)) groups.set(parsed.base, []);
+    groups.get(parsed.base).push({ item, size: parsed.size });
+  }
+  const out = [...standalone];
+  for (const [base, entries] of groups) {
+    if (entries.length < 2) {
+      out.push(...entries.map((entry) => entry.item));
+      continue;
+    }
+    // 基準價 = 最便宜的變體（通常為小份）；大份的價差作為選項加價
+    const basePrice = Math.min(...entries.map((entry) => num(entry.item.price)));
+    const sizeOptions = entries
+      .slice()
+      .sort((a, b) => num(a.item.price) - num(b.item.price))
+      .map((entry) => ({ name: entry.size, price: round2(num(entry.item.price) - basePrice) }));
+    // 合併各變體各自的備註選項（去重）
+    const noteOptions = [];
+    const seen = new Set();
+    for (const entry of entries) {
+      for (const option of (entry.item.options || [])) {
+        const name = typeof option === 'string' ? option : String(option?.name || '').trim();
+        const price = typeof option === 'string' ? 0 : num(option?.price);
+        if (!name) continue;
+        const key = `${name}:${price}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        noteOptions.push({ name, price });
+      }
+    }
+    out.push({ name: base, price: basePrice, options: [...sizeOptions, ...noteOptions] });
+  }
+  return out;
 }
 
 function normalizeMonthly(parsed) {
@@ -193,7 +255,7 @@ export const actions = {
   async aiRecognizeMenu(data) {
     const { imageBase64, mimeType } = validateImage(data);
     const { provider, result } = await recognize(imageBase64, mimeType, PROMPT, normalizeItems);
-    return { provider, items: result };
+    return { provider, items: mergeSizeVariants(result) };
   },
 
   async aiRecognizeMonthlyMenu(data) {

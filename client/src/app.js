@@ -424,8 +424,9 @@ function renderOrderSheet() {
   const session = draft.session;
   const { total, count } = draftTotal();
   const balance = Number(session.walletBalance || 0);
+  const isAdmin = Boolean(draft.adminFor);
   const insufficient = session.pureBalanceMode && total > balance;
-  const cutoffPassed = cutoffRemaining(session.cutoffTime).passed;
+  const cutoffPassed = !isAdmin && cutoffRemaining(session.cutoffTime).passed;
 
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
@@ -434,6 +435,7 @@ function renderOrderSheet() {
           <div>
             <p class="text-[11px] font-bold tracking-[.13em] text-slate-500">ORDER SHEET</p>
             <h2 class="font-serif text-xl font-black">${escapeHtml(session.storeName)}</h2>
+            ${isAdmin ? `<p class="mt-0.5 text-xs font-bold text-stamp">補單對象：${escapeHtml(draft.adminFor.seatNo)} ${escapeHtml(draft.adminFor.name)}</p>` : ''}
             <p class="text-xs text-slate-500">${session.orderDate} · 截止 <span data-cutoff="${session.cutoffTime}">${cutoffRemaining(session.cutoffTime).text}</span></p>
           </div>
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
@@ -463,15 +465,16 @@ function renderOrderSheet() {
                 <input type="checkbox" id="use-wallet" ${draft.useWallet ? 'checked' : ''} class="h-5 w-5 accent-stamp" />
               </label>
             `}
+            ${isAdmin ? `<p class="mb-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">管理員補單：為 ${escapeHtml(draft.adminFor.seatNo)} ${escapeHtml(draft.adminFor.name)} 修改／新增訂單（截止後亦可）。</p>` : ''}
                         <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
             <div class="mb-3 mt-1.5 flex flex-wrap gap-1.5">
               ${['加飯', '加大', '少飯', '不要辣', '免餐具'].map((tag) => `<button type="button" data-note-tag="${tag}" class="rounded-full bg-mist px-2.5 py-1 text-xs font-bold text-ledger ring-1 ring-ledger/10">${tag}</button>`).join('')}
             </div>
             <div class="flex items-center justify-between">
               <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
-              <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${session.existingOrder ? '更新訂單' : '送出訂單'}</button>
+              <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${isAdmin ? (session.existingOrder ? '更新補單' : '送出補單') : (session.existingOrder ? '更新訂單' : '送出訂單')}</button>
             </div>
-            ${session.existingOrder ? '<button id="delete-order" class="mt-2 w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-600">刪除此訂單</button>' : ''}
+            ${session.existingOrder && !isAdmin ? '<button id="delete-order" class="mt-2 w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-600">刪除此訂單</button>' : ''}
           `}
         </div>
       </section>
@@ -531,11 +534,13 @@ async function submitOrder() {
 
   try {
     await busy(async () => {
-      const action = draft.session.existingOrder ? 'updateOrder' : 'placeOrder';
-      await api(action, { sessionId: draft.session.sessionId, selections, note: draft.note, useWallet: draft.useWallet });
-      await refreshBoot();
+      const action = draft.adminFor ? 'adminEditOrder' : (draft.session.existingOrder ? 'updateOrder' : 'placeOrder');
+      const payload = { sessionId: draft.session.sessionId, selections, note: draft.note, useWallet: draft.useWallet };
+      if (draft.adminFor) payload.seatNo = draft.adminFor.seatNo;
+      await api(action, payload);
+      if (draft.adminFor) await refreshAdmin(); else await refreshBoot();
       closeModal();
-      toast('訂單已送出。', 'success');
+      toast(draft.adminFor ? '補單已送出。' : '訂單已送出。', 'success');
     });
   } catch (error) {
     toast(error.message, 'error');
@@ -551,6 +556,38 @@ async function deleteCurrentOrder() {
       closeModal();
       toast('訂單已刪除。', 'success');
     });
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+/* 管理員補單：依座號開啟指定同學的訂餐表單（不受截止時間限制） */
+async function openAdminOrderSheet(sessionId, seatNo) {
+  if (!seatNo) return toast('請輸入座號或學號。', 'error');
+  try {
+    const data = await api('adminGetOrderContext', { sessionId, seatNo });
+    const session = data.session;
+    const existing = session.existingOrder;
+    const selections = {};
+    session.menuItems.forEach((item) => {
+      if (existing) {
+        const found = existing.items.find((it) => it.itemId === item.itemId);
+        if (found) {
+          selections[item.itemId] = {
+            quantity: found.quantity,
+            optionIndexes: found.options.map((option) => item.options.findIndex((opt) => opt.name === option.name)).filter((idx) => idx >= 0),
+          };
+        }
+      }
+    });
+    state.orderDraft = {
+      session,
+      selections,
+      note: existing?.note || '',
+      useWallet: existing ? existing.priorPaid > 0 : true,
+      adminFor: { seatNo: data.user.seatNo, name: data.user.name },
+    };
+    renderOrderSheet();
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -823,7 +860,10 @@ async function renderAdminDashboard(content) {
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
             <div class="flex items-center justify-between">
               <p class="font-bold text-ledger">${escapeHtml(session.storeName)}</p>
-              <span class="text-xs text-slate-400">截止 ${formatClock(session.cutoffTime)}</span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-400">截止 ${formatClock(session.cutoffTime)}</span>
+                <button data-action="admin-add-order" data-session="${session.sessionId}" class="rounded-lg bg-stamp/10 px-2.5 py-1 text-[11px] font-bold text-stamp">＋補單</button>
+              </div>
             </div>
             <div class="mt-2 grid grid-cols-4 gap-2 text-center">
               <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">訂單</p><p class="font-black tabular-nums">${session.orderCount}</p></div>
@@ -1742,6 +1782,19 @@ async function handleAction(action, target) {
       renderAiList();
       break;
     }
+    case 'del-ai-opt': {
+      const idx = Number(target.getAttribute('data-index'));
+      const oi = Number(target.getAttribute('data-opt'));
+      const item = state.aiItems[idx];
+      if (item?.options) { item.options.splice(oi, 1); renderAiList(); }
+      break;
+    }
+    case 'add-ai-opt': {
+      const idx = Number(target.getAttribute('data-index'));
+      const item = state.aiItems[idx];
+      if (item) { item.options = item.options || []; item.options.push({ name: '', price: 0 }); renderAiList(); }
+      break;
+    }
 
     // 管理員 - 排程
     case 'toggle-holiday': {
@@ -1851,6 +1904,13 @@ async function handleAction(action, target) {
 
     // 總覽
     case 'export-csv': await exportCsv(); break;
+    case 'admin-add-order': {
+      const sessionId = target.getAttribute('data-session');
+      promptModal('管理員補單', [{ name: 'seatNo', label: '座號／學號', type: 'text', placeholder: '例如 05' }], async (v) => {
+        await openAdminOrderSheet(sessionId, String(v.seatNo || '').trim());
+      });
+      break;
+    }
 
     default: break;
   }
@@ -2197,7 +2257,10 @@ function showAiPreview(storeId, items) {
         </div>
       </section>
     </div>`;
-  state.aiItems = items.map((item) => ({ ...item }));
+  state.aiItems = items.map((item) => ({
+    ...item,
+    options: (item.options || []).map((opt) => (typeof opt === 'string' ? { name: opt, price: 0 } : { name: opt.name || '', price: Number(opt.price) || 0 })),
+  }));
   renderAiList();
 }
 
@@ -2210,14 +2273,54 @@ function renderAiList() {
         <input data-ai-price="${index}" type="number" inputmode="decimal" value="${item.price}" class="w-20 rounded-lg border border-slate-200 px-2.5 py-2 text-sm outline-none focus:border-ledger" />
         <button data-action="del-ai-item" data-index="${index}" class="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-500">✕</button>
       </div>
-      ${item.options.length ? `<p class="mt-1.5 text-xs text-slate-400">選項：${escapeHtml(item.options.join('、'))}</p>` : ''}
+      ${(item.options && item.options.length) ? `
+        <div class="mt-2 space-y-1.5">
+          ${item.options.map((opt, oi) => `
+            <div class="flex items-center gap-1.5">
+              <input data-ai-opt-name="${index}-${oi}" value="${escapeHtml(opt.name || '')}" placeholder="選項（如 大、加辣）" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+              <input data-ai-opt-price="${index}-${oi}" type="number" inputmode="decimal" value="${opt.price || 0}" placeholder="加價" class="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+              <button data-action="del-ai-opt" data-index="${index}" data-opt="${oi}" class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-xs text-slate-400">×</button>
+            </div>`).join('')}
+        </div>` : ''}
+      <button data-action="add-ai-opt" data-index="${index}" class="mt-2 rounded-lg bg-mist px-2.5 py-1 text-[11px] font-bold text-ledger">＋ 加選項</button>
     </div>`).join('');
-  $$('[data-ai-name]', list).forEach((el) => el.addEventListener('input', () => { state.aiItems[Number(el.getAttribute('data-ai-name'))].name = el.value; }));
-  $$('[data-ai-price]', list).forEach((el) => el.addEventListener('input', () => { state.aiItems[Number(el.getAttribute('data-ai-price'))].price = Number(el.value || 0); }));
+  bindAiEditors(list);
+}
+
+function bindAiEditors(list) {
+  const pair = (value) => value.split('-').map(Number);
+  list.querySelectorAll('[data-ai-name]').forEach((el) => {
+    el.addEventListener('input', () => { state.aiItems[Number(el.getAttribute('data-ai-name'))].name = el.value; });
+  });
+  list.querySelectorAll('[data-ai-price]').forEach((el) => {
+    el.addEventListener('input', () => { state.aiItems[Number(el.getAttribute('data-ai-price'))].price = Number(el.value || 0); });
+  });
+  list.querySelectorAll('[data-ai-opt-name]').forEach((el) => {
+    el.addEventListener('input', () => {
+      const [i, oi] = pair(el.getAttribute('data-ai-opt-name'));
+      const opt = state.aiItems[i]?.options?.[oi];
+      if (opt) opt.name = el.value;
+    });
+  });
+  list.querySelectorAll('[data-ai-opt-price]').forEach((el) => {
+    el.addEventListener('input', () => {
+      const [i, oi] = pair(el.getAttribute('data-ai-opt-price'));
+      const opt = state.aiItems[i]?.options?.[oi];
+      if (opt) opt.price = Number(el.value || 0);
+    });
+  });
 }
 
 async function saveAiItems(storeId) {
-  const items = state.aiItems.filter((item) => item.name.trim());
+  const items = state.aiItems
+    .map((item) => ({
+      name: String(item.name || '').trim(),
+      price: Number(item.price) || 0,
+      options: (item.options || [])
+        .map((opt) => ({ name: String(opt.name || '').trim(), price: Number(opt.price) || 0 }))
+        .filter((opt) => opt.name),
+    }))
+    .filter((item) => item.name);
   try {
     await busy(async () => {
       const result = await api('adminBatchSaveMenuItems', { storeId, items });
