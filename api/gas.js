@@ -35,7 +35,6 @@ const ADMIN = new Set([
   'adminCloseSession',
   'adminDeleteSession',
   'adminPublishWeek',
-  'adminPublishInternalWeek',
   'adminSetHoliday',
   'adminRemoveHoliday',
   'adminGetWeekSchedule',

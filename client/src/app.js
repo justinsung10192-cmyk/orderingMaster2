@@ -1175,7 +1175,6 @@ async function renderAdminSchedule(content) {
           </div>
           <div class="flex flex-wrap gap-2">
             <button data-action="week-cutoff" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">統一截止</button>
-            <button data-action="publish-internal" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">公布內訂</button>
             <button data-action="publish-week" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">一鍵公布本週</button>
           </div>
         </div>
@@ -1938,7 +1937,6 @@ async function handleAction(action, target) {
     case 'add-session': openSessionEditor(target.getAttribute('data-date')); break;
     case 'edit-session': openSessionEditor(null, target.getAttribute('data-session')); break;
     case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); await refreshAdmin(); }); break;
-    case 'publish-internal': openConfirm('公布本週內訂', '公布本週所有「內訂」場次（需先公布本週一般場次）。', async () => { const r = await api('adminPublishInternalWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個內訂場次。`, 'success'); await refreshAdmin(); }); break;
     case 'publish-week': openConfirm('公布本週菜單', '公布後學生即可開始訂餐，並會推播通知。', async () => { const r = await api('adminPublishWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個場次。`, 'success'); await refreshAdmin(); }); break;
     case 'week-cutoff': openWeekCutoffModal(); break;
     case 'add-recurring': {
