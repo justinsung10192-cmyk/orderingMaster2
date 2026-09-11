@@ -406,6 +406,7 @@ function openOrderSheet(session) {
     selections,
     note: existing?.note || '',
     useWallet: existing ? existing.priorPaid > 0 : true,
+    expandedOptions: new Set(),
   };
   renderOrderSheet();
 }
@@ -472,9 +473,6 @@ function renderOrderSheet() {
             `}
             ${isAdmin ? `<p class="mb-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">管理員補單：為 ${escapeHtml(draft.adminFor.seatNo)} ${escapeHtml(draft.adminFor.name)} 修改／新增訂單（截止後亦可）。</p>` : ''}
                         <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
-            <div class="mb-3 mt-1.5 flex flex-wrap gap-1.5">
-              ${['加飯', '加大', '少飯', '不要辣', '免餐具'].map((tag) => `<button type="button" data-note-tag="${tag}" class="rounded-full bg-mist px-2.5 py-1 text-xs font-bold text-ledger ring-1 ring-ledger/10">${tag}</button>`).join('')}
-            </div>
             <div class="flex items-center justify-between">
               <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
               <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${isAdmin ? (session.existingOrder ? '更新補單' : '送出補單') : (session.existingOrder ? '更新訂單' : '送出訂單')}</button>
@@ -487,16 +485,6 @@ function renderOrderSheet() {
 
   $('#use-wallet')?.addEventListener('change', (event) => { state.orderDraft.useWallet = event.target.checked; });
   $('#order-note')?.addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
-  modalRoot.querySelectorAll('[data-note-tag]').forEach((el) => {
-    el.addEventListener('click', () => {
-      const tag = el.getAttribute('data-note-tag');
-      const current = String(state.orderDraft.note || '');
-      if (current.includes(tag)) return;
-      state.orderDraft.note = current ? `${current}、${tag}` : tag;
-      const input = $('#order-note');
-      if (input) input.value = state.orderDraft.note;
-    });
-  });
   $('#submit-order')?.addEventListener('click', () => { if (!insufficient) submitOrder(); });
   $('#delete-order')?.addEventListener('click', () => openConfirm('刪除訂單', '刪除後已扣儲值金將自動退回。', deleteCurrentOrder));
 }
@@ -506,6 +494,8 @@ function renderMenuItem(item) {
   const quantity = sel?.quantity || 0;
   const optionIndexes = sel?.optionIndexes || [];
   const optionTotal = optionIndexes.reduce((sum, idx) => sum + Number(item.options[idx]?.price || 0), 0);
+  const hasOptions = (item.options || []).length > 0;
+  const optionsExpanded = quantity > 0 || state.orderDraft.expandedOptions.has(item.itemId);
   const requiredGroups = new Map();
   const optional = [];
   (item.options || []).forEach((opt, idx) => {
@@ -543,7 +533,8 @@ function renderMenuItem(item) {
           <button data-qty="${item.itemId}" data-delta="1" class="grid h-8 w-8 place-items-center rounded-lg bg-ledger text-lg font-bold text-white">＋</button>
         </div>
       </div>
-      ${requiredHtml}${optionalHtml}
+      ${hasOptions && !optionsExpanded ? `<button data-toggle-options="${item.itemId}" class="mt-2 rounded-lg bg-mist px-2.5 py-1 text-[11px] font-bold text-ledger">＋ 選項（${item.options.length}）</button>` : ''}
+      ${hasOptions && optionsExpanded ? `${requiredHtml}${optionalHtml}` : ''}
     </div>`;
 }
 
@@ -625,6 +616,7 @@ async function openAdminOrderSheet(sessionId, seatNo) {
       note: existing?.note || '',
       useWallet: existing ? existing.priorPaid > 0 : true,
       adminFor: { seatNo: data.user.seatNo, name: data.user.name },
+      expandedOptions: new Set(),
     };
     renderOrderSheet();
   } catch (error) {
@@ -1707,7 +1699,7 @@ async function withAdminRefresh(fn) {
 document.addEventListener('click', onClick);
 
 async function onClick(event) {
-  const target = event.target.closest('[data-action], [data-nav], [data-admin-tab], [data-toggle-week], [data-toggle-date], [data-toggle-store], [data-open-session], [data-close-sheet], [data-qty], [data-option], [data-vote], [data-schedule-week], [data-store], [data-item], [data-user], [data-date], [data-session], [data-order], [data-disabled]');
+  const target = event.target.closest('[data-action], [data-nav], [data-admin-tab], [data-toggle-week], [data-toggle-date], [data-toggle-store], [data-toggle-options], [data-open-session], [data-close-sheet], [data-qty], [data-option], [data-vote], [data-schedule-week], [data-store], [data-item], [data-user], [data-date], [data-session], [data-order], [data-disabled]');
   if (!target) return;
 
   const action = target.getAttribute('data-action');
@@ -1717,6 +1709,7 @@ async function onClick(event) {
   const toggleDate = target.getAttribute('data-toggle-date');
   const toggleStore = target.getAttribute('data-toggle-store');
   const openSession = target.getAttribute('data-open-session');
+  const toggleOptions = target.getAttribute('data-toggle-options');
   const qty = target.getAttribute('data-qty');
   const option = target.getAttribute('data-option');
   const vote = target.getAttribute('data-vote');
@@ -1751,6 +1744,11 @@ async function onClick(event) {
   if (toggleStore) {
     if (state.expandedStores.has(toggleStore)) state.expandedStores.delete(toggleStore); else state.expandedStores.add(toggleStore);
     renderAdminTab();
+    return;
+  }
+  if (toggleOptions) {
+    if (state.orderDraft.expandedOptions.has(toggleOptions)) state.orderDraft.expandedOptions.delete(toggleOptions); else state.orderDraft.expandedOptions.add(toggleOptions);
+    renderOrderSheet();
     return;
   }
   if (openSession) {
