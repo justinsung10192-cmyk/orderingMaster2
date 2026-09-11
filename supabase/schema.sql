@@ -370,6 +370,10 @@ declare
   v_status text;
   v_order_id bigint;
   v_wallet_paid numeric := 0;
+  v_old_prior_paid numeric := 0;
+  v_cash_paid numeric := 0;
+  v_new_prior_paid numeric;
+  v_new_cash_outstanding numeric;
 begin
   select wallet_balance into v_balance
   from users where id = p_user_id and class_id = p_class_id
@@ -378,15 +382,20 @@ begin
     raise exception 'USER_NOT_FOUND';
   end if;
 
-  -- 更新訂單：鎖定訂單列並讀取「資料庫內」的 wallet_paid（只退錢包已付，不把現金算入退款）
+  -- 更新訂單：鎖定訂單列並讀取「資料庫內」的 wallet_paid 與 prior_paid
+  -- （只退錢包已付、保留已繳現金，避免改單後已繳現金消失）
   if p_order_id is not null then
-    select wallet_paid into v_wallet_paid from orders
+    select wallet_paid, coalesce(prior_paid, 0) into v_wallet_paid, v_old_prior_paid from orders
     where id = p_order_id and user_id = p_user_id and class_id = p_class_id
     for update;
     if v_wallet_paid is null then
       raise exception 'ORDER_NOT_FOUND';
     end if;
   end if;
+
+  -- 舊單已繳現金（先繳的現金不能因為改單而消失）
+  v_cash_paid := v_old_prior_paid - v_wallet_paid;
+  if v_cash_paid < 0 then v_cash_paid := 0; end if;
 
   -- 純儲值模式：錢包必須足以支付全額，禁止現金欠款
   if p_pure_mode then
@@ -411,23 +420,28 @@ begin
   update users set wallet_balance = v_balance, updated_at = now()
   where id = p_user_id;
 
-  if p_cash_outstanding > 0 and p_wallet_paid > 0 then
+  -- 新的已付總額 = 錢包新付 + 已繳現金（不超過新總額）
+  v_new_prior_paid := p_wallet_paid + v_cash_paid;
+  if v_new_prior_paid > p_total then v_new_prior_paid := p_total; end if;
+  v_new_cash_outstanding := p_total - v_new_prior_paid;
+
+  if v_new_cash_outstanding <= 0 then
+    if v_cash_paid > 0 then v_status := 'PaidCash'; else v_status := 'PaidWallet'; end if;
+  elsif v_new_prior_paid > 0 then
     v_status := 'PartiallyPaid';
-  elsif p_cash_outstanding > 0 then
-    v_status := 'UnpaidCash';
   else
-    v_status := 'PaidWallet';
+    v_status := 'UnpaidCash';
   end if;
 
   if p_order_id is not null then
     update orders
-       set items = p_items, total_price = p_total, prior_paid = p_wallet_paid, wallet_paid = p_wallet_paid,
+       set items = p_items, total_price = p_total, prior_paid = v_new_prior_paid, wallet_paid = p_wallet_paid,
            payment_status = v_status, note = p_note, updated_at = now()
      where id = p_order_id
     returning id into v_order_id;
   else
     insert into orders (class_id, session_id, user_id, items, total_price, prior_paid, wallet_paid, payment_status, pickup_status, note)
-    values (p_class_id, p_session_id, p_user_id, p_items, p_total, p_wallet_paid, p_wallet_paid, v_status, 'Pending', p_note)
+    values (p_class_id, p_session_id, p_user_id, p_items, p_total, v_new_prior_paid, p_wallet_paid, v_status, 'Pending', p_note)
     returning id into v_order_id;
   end if;
 
@@ -439,9 +453,9 @@ begin
     insert into transactions (class_id, user_id, order_id, amount, kind, note)
     values (p_class_id, p_user_id, v_order_id, -p_wallet_paid, 'Wallet', '訂餐扣款');
   end if;
-  if p_cash_outstanding > 0 then
+  if v_new_cash_outstanding > 0 then
     insert into transactions (class_id, user_id, order_id, amount, kind, note)
-    values (p_class_id, p_user_id, v_order_id, p_cash_outstanding, 'Cash', '現金未繳');
+    values (p_class_id, p_user_id, v_order_id, v_new_cash_outstanding, 'Cash', '現金未繳');
   end if;
 
   return jsonb_build_object(
