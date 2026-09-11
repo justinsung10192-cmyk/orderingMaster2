@@ -327,7 +327,7 @@ async function findOrCreateMenuItem(classId, storeId, name, price, options, menu
 async function findOrCreateSession(classId, storeId, date, cutoffTime = '09:30') {
   const existing = await findOne('sessions', { store_id: storeId, order_date: date }, classId);
   if (existing) return { session: existing, created: false }; // 含已刪除，尊重管理者手動刪除
-  const cutoff = new Date(`${date}T${cutoffTime}:00`);
+  const cutoff = new Date(`${date}T${cutoffTime}:00+08:00`);
   const session = await insertRow('sessions', {
     class_id: classId,
     store_id: storeId,

@@ -773,7 +773,7 @@ async function showMyQr(type) {
           </div>
           <div class="mt-4 flex flex-col items-center">
             <div id="my-qr" class="rounded-2xl border-2 border-dashed border-ledger/20 p-3"></div>
-            <p class="mt-3 text-xs text-slate-400">4 位數 PIN 碼（5 分鐘後失效）</p>
+            <p class="mt-3 text-xs text-slate-400">6 位數 PIN 碼（5 分鐘後失效）</p>
             <p class="pin-box mt-1 font-serif text-4xl font-black text-ledger">${result.pin}</p>
             <p data-cutoff="${result.expiresAt}" class="mt-2 text-xs font-bold text-apricot">${cutoffRemaining(result.expiresAt).text}</p>
           </div>
@@ -1243,7 +1243,7 @@ function renderAdminVerify(content) {
         <button data-action="seat-input" class="rounded-xl bg-apricot py-3.5 text-sm font-bold text-white">🔍 座號</button>
       </div>
       <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
-        <p class="text-xs text-slate-400">掃描 QR、輸入 4 位 PIN，或直接輸入座號，即可快速執行「儲值、扣款結帳、取餐標記」。</p>
+        <p class="text-xs text-slate-400">掃描 QR、輸入 6 位 PIN，或直接輸入座號，即可快速執行「儲值、扣款結帳、取餐標記」。</p>
       </div>
       ${state.admin.lastVerify ? verifyResultHtml(state.admin.lastVerify) : ''}
     </div>`;
@@ -1509,9 +1509,9 @@ function openScanner() {
         </div>
         <div id="qr-reader" class="mx-4 overflow-hidden rounded-xl bg-slate-100"></div>
         <div class="px-5 py-4">
-          <p class="text-xs leading-5 text-slate-500">或手動輸入 4 位 PIN：</p>
+          <p class="text-xs leading-5 text-slate-500">或手動輸入 6 位 PIN：</p>
           <div class="mt-2 flex gap-2">
-            <input id="manual-pin" inputmode="numeric" maxlength="4" class="pin-box min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-center text-xl font-black outline-none focus:border-ledger" placeholder="••••" />
+            <input id="manual-pin" inputmode="numeric" maxlength="6" class="pin-box min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-center text-xl font-black outline-none focus:border-ledger" placeholder="••••" />
             <button data-action="submit-pin" class="rounded-xl bg-stamp px-4 text-xs font-bold text-white">驗證</button>
           </div>
         </div>
@@ -1955,7 +1955,7 @@ async function handleAction(action, target) {
     // 管理員 - 核銷
     case 'open-scanner': openScanner(); break;
     case 'pin-input': {
-      promptModal('輸入 PIN 碼', [{ name: 'pin', label: '4 位數 PIN', type: 'text' }], async (v) => { const r = await api('adminResolvePin', { pin: v.pin }); closeModal(); renderVerifyResult(r); });
+      promptModal('輸入 PIN 碼', [{ name: 'pin', label: '6 位數 PIN', type: 'text' }], async (v) => { const r = await api('adminResolvePin', { pin: v.pin }); closeModal(); renderVerifyResult(r); });
       break;
     }
     case 'seat-input': {
@@ -2028,7 +2028,7 @@ async function handleAction(action, target) {
     case 'view-overdue': await viewOverdue(); break;
     case 'copy-overdue': await copyOverdue(); break;
     case 'reset-all': openConfirm('刪除所有資料', '這會清除所有訂單、交易、場次、投票、放假、店家與菜單，並歸零儲值餘額。此操作無法復原！', async () => { await api('adminResetAllData'); toast('已刪除所有資料。', 'success'); await refreshAdmin(); }); break;
-    case 'export-backup': await busy(async () => { const r = await api('adminExportBackup'); downloadJson(`訂餐通備份-${r.exportedAt.slice(0, 10)}.json`, r); toast('備份已下載。', 'success'); }); break;
+    case 'export-backup': await busy(async () => { const r = await api('adminExportBackup'); downloadJson(`訂餐通備份-${r.exportedAt.slice(0, 10)}.json`, r.backup); toast('備份已下載。', 'success'); }); break;
     case 'restore-backup': openRestoreModal(); break;
 
     // 總覽

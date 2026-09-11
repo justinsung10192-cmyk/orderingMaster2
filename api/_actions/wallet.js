@@ -86,10 +86,14 @@ export const actions = {
     if (!target) throw appError('NOT_FOUND', '找不到使用者。');
     const orderIds = (data.orderIds || []).map(Number).filter(Boolean);
     if (!orderIds.length) throw appError('INVALID_INPUT', '沒有可結清的訂單。');
+    // 只結清屬於該同學的訂單，避免誤結他人（或靜默略過）
+    const orders = await listRowsIn('orders', 'id', orderIds, { classId: ctx.classId });
+    const validIds = orders.filter((order) => String(order.user_id) === String(target.id)).map((order) => order.id);
+    if (!validIds.length) throw appError('INVALID_INPUT', '沒有可結清的訂單。');
     const result = await callRpc('fn_settle_cash', {
       p_class_id: ctx.classId,
       p_user_id: target.id,
-      p_order_ids: orderIds,
+      p_order_ids: validIds,
     });
     return { ok: true, settled: num(result.settled) };
   },

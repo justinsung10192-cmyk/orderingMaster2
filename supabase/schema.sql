@@ -204,6 +204,8 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_transactions_user on public.transactions (user_id, created_at);
+create index if not exists idx_transactions_class on public.transactions (class_id, created_at);
+create index if not exists idx_orders_status on public.orders (class_id, is_deleted, payment_status);
 
 -- QR / PIN 核銷憑證（每位使用者 x 場次，產生臨時 QR 與 4 位 PIN）------------------
 create table if not exists public.verification_records (
@@ -537,6 +539,7 @@ begin
     where o.class_id = p_class_id and o.user_id = p_user_id
       and o.payment_status in ('UnpaidCash', 'PartiallyPaid')
     order by o.created_at
+    for update
   loop
     if v_remaining <= 0 then exit; end if;
     v_outstanding := v_order.total_price - v_order.prior_paid;

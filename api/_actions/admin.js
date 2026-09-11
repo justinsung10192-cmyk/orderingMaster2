@@ -427,7 +427,7 @@ export const actions = {
     if (Array.isArray(dump.users)) {
       dump.users = dump.users.map(({ password_hash, salt, auth_version, ...rest }) => rest);
     }
-    return { exportedAt: new Date().toISOString(), classId: ctx.classId, backup: dump };
+    return { exportedAt: new Date().toISOString(), classId: ctx.classId, backup: { tables: dump } };
   },
 
   // 手動指派值日生（某日）

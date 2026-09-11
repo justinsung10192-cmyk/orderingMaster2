@@ -230,7 +230,7 @@ export async function materializeRecurring(classId, { days = 14 } = {}) {
     for (const date of dates) {
       if (holidaySet.has(date)) continue;
       if (existingKeys.has(`${rec.store_id}:${date}`)) continue;
-      const cutoff = new Date(`${date}T${rec.cutoff_time}:00`);
+      const cutoff = new Date(`${date}T${rec.cutoff_time}:00+08:00`);
       await insertRow('sessions', {
         class_id: classId,
         store_id: rec.store_id,

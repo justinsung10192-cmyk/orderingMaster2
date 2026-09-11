@@ -1,7 +1,7 @@
 // 動作：登入、首次設定（強制改密碼與姓名）、改密碼、Bootstrap
 import { appError, sid, num, nextWeekLabel } from '../_lib/util.js';
 import { findOne, updateRows, deleteRows, getClass, isPureBalanceMode, listStoresForClass, listRows, listRowsIn, getAppSetting } from '../_lib/db.js';
-import { verifyPassword, createPassword, createSession, destroySession, bumpAuthVersion } from '../_lib/auth.js';
+import { verifyPassword, createPassword, createSession, destroySession, bumpAuthVersion, DEFAULT_PASSWORD } from '../_lib/auth.js';
 import { getVapidPublicKey } from '../_lib/push.js';
 import { publicUser, publicOrder, loadOpenSessions, loadSessionWithMenu, publicSession } from '../_lib/serialize.js';
 
@@ -43,6 +43,7 @@ export const actions = {
     if (!ctx.user.must_change_password) throw appError('FORBIDDEN', '請使用「修改密碼」功能，並輸入目前密碼。');
     if (!studentName) throw appError('INVALID_INPUT', '請填寫你的姓名。');
     if (!password || password.length < 8) throw appError('WEAK_PASSWORD', '密碼至少須為 8 個字元。');
+    if (password === DEFAULT_PASSWORD) throw appError('WEAK_PASSWORD', '新密碼不可與預設密碼相同，請改用其他密碼。');
 
     const { salt, hash } = createPassword(password);
     await updateRows('users', { id: ctx.user.id }, {
@@ -72,6 +73,7 @@ export const actions = {
     const newPassword = String(data.newPassword || '');
     if (!verifyPassword(ctx.user, oldPassword)) throw appError('INVALID_CREDENTIALS', '目前密碼不正確。');
     if (!newPassword || newPassword.length < 8) throw appError('WEAK_PASSWORD', '新密碼至少須為 8 個字元。');
+    if (newPassword === DEFAULT_PASSWORD) throw appError('WEAK_PASSWORD', '新密碼不可與預設密碼相同，請改用其他密碼。');
 
     const { salt, hash } = createPassword(newPassword);
     await updateRows('users', { id: ctx.user.id }, { password_hash: hash, salt, updated_at: new Date().toISOString() });
@@ -97,7 +99,7 @@ export const actions = {
     const { sessions, orders } = await loadOpenSessions(user, { pureBalanceMode });
 
     // 店家（供投票）
-    const stores = (await listStoresForClass(classId)).map((store) => ({
+    const stores = (await listStoresForClass(classId, { includeInactive: false })).map((store) => ({
       storeId: sid(store.id),
       name: store.name,
       isActive: Boolean(store.is_active),

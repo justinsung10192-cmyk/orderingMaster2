@@ -42,9 +42,12 @@ export function sha256Hex(text) {
   return crypto.createHash('sha256').update(String(text)).digest('hex');
 }
 
-// 本機日期（YYYY-MM-DD，與資料庫 order_date 一致）
+// 台灣時區偏移（UTC+8）：伺服器（如 Vercel）預設跑在 UTC，日期/截止時間需以台灣時間為準
+const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// 本機日期（YYYY-MM-DD，與資料庫 order_date 一致；以台灣時區計算）
 export function todayString(offsetDays = 0) {
-  const d = new Date();
+  const d = new Date(Date.now() + TZ_OFFSET_MS);
   d.setDate(d.getDate() + offsetDays);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -88,9 +91,10 @@ export function sendJson(res, payload) {
 
 // ===== 週別工具（週一至週日，ISO 週） =====
 
-// 取得某日所屬週一的本地日期（YYYY-MM-DD）
+// 取得某日所屬週一的本地日期（YYYY-MM-DD；以台灣時區計算）
 export function mondayOf(input = new Date()) {
-  const d = new Date(input);
+  const ms = input instanceof Date ? input.getTime() : new Date(input).getTime();
+  const d = new Date(ms + TZ_OFFSET_MS);
   const day = d.getDay(); // 0=Sun, 1=Mon ...
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);

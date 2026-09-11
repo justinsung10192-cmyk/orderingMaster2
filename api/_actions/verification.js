@@ -61,7 +61,7 @@ export const actions = {
       if (!session) throw appError('NOT_FOUND', '找不到場次。');
     }
     const intent = data.type === 'pay' ? 'pay' : 'pickup';
-    const pin = randomDigits(4);
+    const pin = randomDigits(6);
     const exp = Date.now() + VERIFY_MINUTES * 60 * 1000;
     const payload = { v: 1, uid: sid(ctx.user.id), pin, type: intent, exp, sid: sessionId ? sid(sessionId) : '' };
     await insertRow('verification_records', {
@@ -94,7 +94,7 @@ export const actions = {
 
   async adminResolvePin(data, ctx) {
     const pin = String(data.pin || '').trim();
-    if (!/^\d{4}$/.test(pin)) throw appError('INVALID_PIN', '請輸入 4 位數 PIN 碼。');
+    if (!/^\d{6}$/.test(pin)) throw appError('INVALID_PIN', '請輸入 6 位數 PIN 碼。');
 
     const record = await findOne('verification_records', { class_id: ctx.classId, pin_hash: sha256Hex(pin), status: 'Pending' });
     if (!record) throw appError('INVALID_PIN', '找不到對應的 PIN，或此 PIN 已失效。');

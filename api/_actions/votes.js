@@ -19,7 +19,7 @@ export const actions = {
     const weekLabel = nextWeekLabel();
     const myVotes = await listRows('votes', { classId: ctx.classId, filters: { user_id: ctx.user.id, week_label: weekLabel } });
     const { tally } = await tallyVotes(ctx.classId, weekLabel);
-    const stores = (await listStoresForClass(ctx.classId)).map((store) => ({
+    const stores = (await listStoresForClass(ctx.classId, { includeInactive: false })).map((store) => ({
       storeId: sid(store.id),
       name: store.name,
       isActive: Boolean(store.is_active),
