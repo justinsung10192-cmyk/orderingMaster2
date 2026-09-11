@@ -94,6 +94,31 @@ export const actions = {
     return { ok: true, settled: num(result.settled) };
   },
 
+  // 一週結算：把該週所有「現金未繳」的訂單一次結清（與一般場次一樣每週收一次錢）
+  async adminSettleWeek(data, ctx) {
+    const weekLabel = String(data.weekLabel || '').trim();
+    if (!/^\d{4}-W\d{1,2}$/.test(weekLabel)) throw appError('INVALID_INPUT', '週別格式不正確。');
+    const sessions = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel, is_deleted: false } });
+    if (!sessions.length) throw appError('NOT_FOUND', '該週沒有場次。');
+    const sessionIds = sessions.map((session) => session.id);
+    const orders = await listRowsIn('orders', 'session_id', sessionIds, { classId: ctx.classId });
+    const unpaid = orders.filter((order) => !order.is_deleted && order.user_id && (order.payment_status === 'UnpaidCash' || order.payment_status === 'PartiallyPaid'));
+    if (!unpaid.length) throw appError('NOT_FOUND', '該週沒有待結算的訂單。');
+
+    // 按使用者分組，逐人呼叫 fn_settle_cash
+    const byUser = new Map();
+    for (const order of unpaid) {
+      if (!byUser.has(order.user_id)) byUser.set(order.user_id, []);
+      byUser.get(order.user_id).push(order.id);
+    }
+    let settledAmount = 0;
+    for (const [userId, orderIds] of byUser) {
+      const result = await callRpc('fn_settle_cash', { p_class_id: ctx.classId, p_user_id: userId, p_order_ids: orderIds });
+      settledAmount += num(result.settled);
+    }
+    return { ok: true, weekLabel, settledOrders: unpaid.length, settledAmount };
+  },
+
   async adminManualBalance(data, ctx) {
     const amount = Number(data.amount);
     if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 100000) throw appError('INVALID_INPUT', '請輸入正確的調整金額。');

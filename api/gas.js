@@ -47,6 +47,7 @@ const ADMIN = new Set([
   'adminBatchSaveMenuItems',
   'adminTopUp',
   'adminSettleCash',
+  'adminSettleWeek',
   'adminManualBalance',
   'adminResolveVerification',
   'adminResolvePin',

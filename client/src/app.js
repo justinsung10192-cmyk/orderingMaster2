@@ -853,7 +853,8 @@ async function renderAdminDashboard(content) {
           </div>
           <div class="flex gap-2">
             <input type="date" id="dashboard-date" value="${data.date}" class="rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-ledger" />
-            <button data-action="export-csv" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">匯出 CSV</button>
+            <button data-action="settle-week" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">本週結算</button>
+            <button data-action="export-csv" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">匯出 CSV</button>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1951,6 +1952,16 @@ async function handleAction(action, target) {
     case 'restore-backup': openRestoreModal(); break;
 
     // 總覽
+    case 'settle-week': {
+      const date = state.admin.dashboardDate || todayString();
+      const weekLabel = weekLabelOf(new Date(`${date}T00:00:00`));
+      openConfirm('本週結算', '將結清本週所有「現金未繳」的訂單（等同一次收齊本週餐費），確定嗎？', async () => {
+        const r = await api('adminSettleWeek', { weekLabel });
+        toast(`已結算 ${r.settledOrders} 筆訂單，共收現金 $${money(r.settledAmount)}。`, 'success');
+        await refreshAdmin();
+      });
+      break;
+    }
     case 'export-csv': await exportCsv(); break;
     case 'admin-add-order': {
       const sessionId = target.getAttribute('data-session');

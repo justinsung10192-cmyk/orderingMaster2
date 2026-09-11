@@ -4,18 +4,22 @@
 //   2) 每月菜單：學校內訂菜單，每天日期＋店家＋品項（aiRecognizeMonthlyMenu，每月更新）
 import { appError, num, round2 } from '../_lib/util.js';
 
-const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的「所有」品項（一個都不能漏、不能省略），並標出每個品項的價格與選項。
+const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的「所有」品項（一個都不能漏、不能省略），並標出每個品項的價格、類型與選項。
 規則：
 1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
 2. 每個品項是一個物件，格式為：
-   {"name":"品項名稱","price":數字,"required":[{"group":"群組名","options":[{"name":"選項","price":加價}]}],"optional":[{"name":"選項","price":加價}]}
-3. price 是該品項的「基準價」（新台幣元；有大小份時填最小份的價格）。無法辨識價格時填 0。
-4. required 是「必選」選項群組：每個群組只能擇一（例如：大小、甜度、冰塊、辣度、口味、主菜）。群組內 options 的 price 是「相對基準價的加價」，基準選項填 0。若菜單把「便當(大)」「便當(小)」分開列，請整併成一個「便當」，把大小放進 required 的「大小」群組。
-5. optional 是「可選」的加價或備註（可多選），例如加飯、加辣、加滷蛋、不加蔥；price 是加價金額（不加價填 0）。
-6. 沒有選項時，required 與 optional 都填空陣列 []。
-7. 每個品項的選項都是獨立、互不共用的（不要跨品項共用選項）。
-8. 忽略照片中的標語、電話、地址等非菜單內容。
-9. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
+   {"name":"品項名稱","type":"飲料"或"餐點","price":數字,"required":[{"group":"群組名","options":[{"name":"選項","price":加價}]}],"optional":[{"name":"選項","price":加價}]}
+3. type：飲料類（茶、咖啡、果汁、豆漿、汽水、冰沙等）填「飲料」，其他（飯、麵、便當、小吃、點心等）填「餐點」。
+4. price 是該品項的「基準價」（新台幣元；有大小份時填最小份的價格）。無法辨識價格時填 0。
+5. required 是「必選」選項群組（每個群組只能擇一）：
+   - 飲料：甜度、冰量、大小杯（若店家有分大/中/小杯）為必選；加料（珍珠、椰果、布丁等）是可選。
+   - 餐點：飯/麵選擇、大小（若店家分大小份）為必選；加飯、加辣、加蛋等是可選。
+   - 若菜單把「便當(大)」「便當(小)」分開列，請整併成一個「便當」，把大小放進 required 的「大小」群組。
+6. optional 是「可選」的加價或加料（可多選），例如加飯、加辣、加滷蛋、加珍珠、加椰果；price 是加價金額（不加價填 0）。
+7. 沒有選項時，required 與 optional 都填空陣列 []。
+8. 每個品項的選項都是獨立、互不共用的（不要跨品項共用選項）。
+9. 忽略照片中的標語、電話、地址等非菜單內容。
+10. 若完全沒有辨識到任何品項，輸出空陣列 []。`;
 
 function monthlyPrompt(month) {
   const [year, mon] = month.split('-');
@@ -76,6 +80,7 @@ function normalizeItems(parsed) {
   return list
     .map((item) => ({
       name: String(item?.name || '').trim(),
+      type: String(item?.type || '').trim(),
       price: num(item?.price),
       options: normalizeItemOptions(item),
     }))
@@ -130,9 +135,68 @@ function mergeSizeVariants(items) {
         extra.push({ name, price, required, group });
       }
     }
-    out.push({ name: base, price: basePrice, options: [...sizeOptions, ...extra] });
+    out.push({ name: base, price: basePrice, type: entries[0].item.type || '', options: [...sizeOptions, ...extra] });
   }
   return out;
+}
+
+// 飲料關鍵字（判斷品項是否為飲料；AI 已標 type 時以 type 為準）
+const DRINK_KEYWORDS = [
+  '奶茶', '紅茶', '綠茶', '烏龍', '青茶', '清茶', '冬瓜茶', '檸檬茶', '柚子茶', '多多綠',
+  '咖啡', '拿鐵', '美式', '卡布', '濃縮',
+  '果汁', '柳橙汁', '檸檬汁', '蘋果汁', '葡萄汁',
+  '豆漿', '米漿', '豆奶',
+  '可樂', '汽水', '沙士', '氣泡', '蘇打',
+  '珍奶', '波霸', '珍珠',
+  '多多', '養樂多', '優格', '優酪乳', '可爾必思',
+  '冰沙', '奶昔', '思樂冰',
+  '鮮奶', '牛奶', '可可', '巧克力',
+  '紅豆湯', '綠豆湯', '薏仁', '仙草', '愛玉', '冬瓜', '青草',
+];
+const SWEETNESS = ['無糖', '1分', '3分', '5分', '7分', '全糖'];
+const ICE = ['常溫', '去冰', '微冰', '少冰', '正常冰'];
+const RICE_NOODLE = ['飯', '白飯', '麵', '湯麵', '乾麵', '拉麵', '冬粉', '米粉', '板條', '河粉'];
+const SIZE_NAMES = ['大', '中', '小', '大份', '中份', '小份', '大杯', '中杯', '小杯', '大碗', '中碗', '小碗'];
+
+function looksLikeDrink(name) {
+  return DRINK_KEYWORDS.some((keyword) => name.includes(keyword));
+}
+
+function hasRequiredGroup(options, group) {
+  return options.some((option) => option.required && option.group === group);
+}
+
+// 智慧選項：依品項類型套用預設選項與必選規則
+// 飲料：甜度、冰量固定清單必選；加料（AI 辨識）可選；大小杯（若店家分）必選
+// 餐點：飯/麵、大小必選；加飯/加辣等可選
+function applySmartOptions(items) {
+  return items.map((item) => {
+    const options = (item.options || []).map((option) => ({ ...option }));
+    const isDrink = item.type === '飲料' || (item.type !== '餐點' && looksLikeDrink(item.name));
+
+    if (isDrink) {
+      if (!hasRequiredGroup(options, '甜度')) {
+        for (const name of SWEETNESS) options.push({ name, price: 0, required: true, group: '甜度' });
+      }
+      if (!hasRequiredGroup(options, '冰量')) {
+        for (const name of ICE) options.push({ name, price: 0, required: true, group: '冰量' });
+      }
+    }
+
+    // 飯/麵選擇 → 必選「主餐」群組
+    const riceNoodle = options.filter((option) => RICE_NOODLE.includes(option.name) && !option.required);
+    if (riceNoodle.length >= 1 && !hasRequiredGroup(options, '主餐')) {
+      riceNoodle.forEach((option) => { option.required = true; option.group = '主餐'; });
+    }
+
+    // 大小選項（大小份、大小杯）→ 必選「大小」群組
+    const sizeOptions = options.filter((option) => SIZE_NAMES.includes(option.name) && !option.required);
+    if (sizeOptions.length >= 1 && !hasRequiredGroup(options, '大小')) {
+      sizeOptions.forEach((option) => { option.required = true; option.group = '大小'; });
+    }
+
+    return { ...item, options };
+  });
 }
 
 function normalizeMonthly(parsed) {
@@ -287,7 +351,7 @@ export const actions = {
   async aiRecognizeMenu(data) {
     const { imageBase64, mimeType } = validateImage(data);
     const { provider, result } = await recognize(imageBase64, mimeType, PROMPT, normalizeItems);
-    return { provider, items: mergeSizeVariants(result) };
+    return { provider, items: applySmartOptions(mergeSizeVariants(result)) };
   },
 
   async aiRecognizeMonthlyMenu(data) {
