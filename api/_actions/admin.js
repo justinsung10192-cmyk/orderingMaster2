@@ -1,6 +1,6 @@
 // 動作：管理員儀表板、帳號管理（含管理者安全防呆）、系統設定、匯總、催繳
 import { appError, sid, num, round2, todayString, weekdayName, monthDay } from '../_lib/util.js';
-import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase } from '../_lib/db.js';
+import { findOne, listRows, listRowsIn, insertRow, updateRows, deleteRows, getClass, listStoresForClass, supabase, getAppSetting, setAppSetting } from '../_lib/db.js';
 import { defaultPasswordCredentials, createPassword } from '../_lib/auth.js';
 import { dashboardOrderRow, outstandingOf, publicUser, orderItems, itemNameOf } from '../_lib/serialize.js';
 
@@ -292,6 +292,7 @@ export const actions = {
       className: classRow.name,
       pureBalanceMode: Boolean(classRow.pure_balance_mode),
       overdueRemindHours: Number(classRow.overdue_remind_hours) || 24,
+      announcement: await getAppSetting(ctx.classId, 'announcement', ''),
     };
   },
 
@@ -305,7 +306,49 @@ export const actions = {
     if ([6, 12, 24].includes(remindHours)) {
       await updateRows('classes', { class_id: ctx.classId }, { overdue_remind_hours: remindHours });
     }
+    if (data.announcement !== undefined) {
+      await setAppSetting(ctx.classId, 'announcement', String(data.announcement || '').slice(0, 300));
+    }
     return { ok: true };
+  },
+
+  // 歷程記錄：所有人的活動（儲值／訂餐／現金結帳／取餐／退款／調整）
+  async adminGetActivityLog(data, ctx) {
+    const limit = Math.min(Number(data.limit) || 300, 500);
+    const [tx, orders] = await Promise.all([
+      listRows('transactions', { classId: ctx.classId, order: 'created_at', orderAscending: false, limit }),
+      listRows('orders', { classId: ctx.classId, order: 'updated_at', orderAscending: false, limit }),
+    ]);
+    const userIds = [...new Set([...tx.map((t) => t.user_id), ...orders.map((o) => o.user_id)].filter(Boolean))];
+    const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId: ctx.classId }) : [];
+    const userById = new Map(users.map((u) => [String(u.id), u]));
+    const kindLabel = { TopUp: '儲值', Wallet: '訂餐扣款', Cash: '現金結帳', Refund: '退款', Manual: '手動調整' };
+
+    const activities = [];
+    for (const t of tx) {
+      const u = userById.get(String(t.user_id));
+      activities.push({
+        id: `tx-${t.id}`,
+        time: t.created_at,
+        type: kindLabel[t.kind] || t.kind,
+        seatNo: u?.seat_no || '',
+        studentNo: u?.student_no || '',
+        name: u?.student_name || '已刪除帳號',
+        detail: t.note || '',
+        amount: num(t.amount),
+      });
+    }
+    for (const o of orders) {
+      if (o.is_deleted) continue;
+      const u = userById.get(String(o.user_id));
+      const who = { seatNo: u?.seat_no || '', studentNo: u?.student_no || '', name: u?.student_name || '已刪除帳號' };
+      activities.push({ id: `order-${o.id}`, time: o.created_at, type: '訂餐', ...who, detail: itemNameOf(o), amount: num(o.total_price) });
+      if (o.pickup_status === 'PickedUp') {
+        activities.push({ id: `pickup-${o.id}`, time: o.updated_at, type: '取餐', ...who, detail: itemNameOf(o), amount: num(o.total_price) });
+      }
+    }
+    activities.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    return { activities: activities.slice(0, limit), total: activities.length };
   },
 
   // ---- 催繳 ----

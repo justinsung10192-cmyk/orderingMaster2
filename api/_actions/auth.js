@@ -1,6 +1,6 @@
 // 動作：登入、首次設定（強制改密碼與姓名）、改密碼、Bootstrap
 import { appError, sid, num, nextWeekLabel } from '../_lib/util.js';
-import { findOne, updateRows, deleteRows, getClass, isPureBalanceMode, listStoresForClass, listRows, listRowsIn } from '../_lib/db.js';
+import { findOne, updateRows, deleteRows, getClass, isPureBalanceMode, listStoresForClass, listRows, listRowsIn, getAppSetting } from '../_lib/db.js';
 import { verifyPassword, createPassword, createSession, destroySession, bumpAuthVersion } from '../_lib/auth.js';
 import { getVapidPublicKey } from '../_lib/push.js';
 import { publicUser, publicOrder, loadOpenSessions, loadSessionWithMenu, publicSession } from '../_lib/serialize.js';
@@ -113,11 +113,13 @@ export const actions = {
     });
 
     const holidays = await listRows('holidays', { classId });
+    const announcement = await getAppSetting(classId, 'announcement', '');
 
     return {
       user: publicUser(user),
       isAdmin: user.role === 'Admin',
       pureBalanceMode,
+      announcement,
       sessions,
       orders,
       stores,

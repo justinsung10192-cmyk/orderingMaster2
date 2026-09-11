@@ -83,12 +83,13 @@ export const actions = {
     return { ok: true, refundedCount: result.refunded_count };
   },
 
-  // 一鍵公布某週所有場次，並推播「訂餐開始」
+  // 一鍵公布某週所有場次（不包含「內訂」，內訂需等本週公布後另行公布），並推播「訂餐開始」
   async adminPublishWeek(data, ctx) {
     const weekLabel = String(data.weekLabel || '');
     if (!/^\d{4}-W\d{1,2}$/.test(weekLabel)) throw appError('INVALID_INPUT', '週別格式不正確。');
     const sessions = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel } });
-    const drafts = sessions.filter((session) => !session.is_deleted && !session.is_open);
+    const internalStore = await findOne('stores', { name: '內訂', is_deleted: false }, ctx.classId);
+    const drafts = sessions.filter((session) => !session.is_deleted && !session.is_open && (!internalStore || Number(session.store_id) !== Number(internalStore.id)));
     for (const session of drafts) {
       await updateRows('sessions', { id: session.id }, { is_open: true, start_notice_sent: true, cutoff_reminder_sent: false });
     }
@@ -101,6 +102,23 @@ export const actions = {
     }
     await materializeRecurring(ctx.classId);
     return { ok: true, published: drafts.length };
+  },
+
+  // 公布本週內訂場次（需本週已公布一般場次後才能執行）
+  async adminPublishInternalWeek(data, ctx) {
+    const weekLabel = String(data.weekLabel || '');
+    if (!/^\d{4}-W\d{1,2}$/.test(weekLabel)) throw appError('INVALID_INPUT', '週別格式不正確。');
+    const internalStore = await findOne('stores', { name: '內訂', is_deleted: false }, ctx.classId);
+    if (!internalStore) throw appError('NOT_FOUND', '尚未建立「內訂」店家。');
+    const weekSessions = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel, is_deleted: false } });
+    const nonInternal = weekSessions.filter((session) => Number(session.store_id) !== Number(internalStore.id));
+    const weekPublished = nonInternal.length === 0 || nonInternal.some((session) => session.is_open);
+    if (!weekPublished) throw appError('NOT_READY', '請先公布本週一般場次，才能公布內訂。');
+    const internalSessions = weekSessions.filter((session) => Number(session.store_id) === Number(internalStore.id) && !session.is_open);
+    for (const session of internalSessions) {
+      await updateRows('sessions', { id: session.id }, { is_open: true, start_notice_sent: true, cutoff_reminder_sent: false });
+    }
+    return { ok: true, published: internalSessions.length };
   },
 
   // 標記／取消放假

@@ -22,7 +22,7 @@ const state = {
   boot: null, // getBootstrap 結果
   collapsedWeeks: new Set(),
   collapsedDates: new Set(),
-  collapsedStores: new Set(),
+  expandedStores: new Set(),
   orderDraft: null,
   admin: {
     dashboard: null, dashboardDate: todayString(),
@@ -297,6 +297,11 @@ function renderOrderView(root) {
 
   root.innerHTML = `
     <section class="view-enter space-y-5">
+      ${state.boot?.announcement ? `
+      <div class="rounded-2xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+        <p class="text-[11px] font-bold tracking-[.13em] text-amber-600">📢 公告</p>
+        <p class="mt-1 whitespace-pre-line text-sm font-bold leading-6 text-amber-800">${escapeHtml(state.boot.announcement)}</p>
+      </div>` : ''}
       <div class="relative overflow-hidden rounded-[1.5rem] bg-ledger px-6 py-6 text-white shadow-paper">
         <div class="relative">
           <p class="text-xs font-bold tracking-[.16em] text-blue-200">TODAY'S NOTE</p>
@@ -800,6 +805,7 @@ function renderAdminView(root) {
     { id: 'schedule', label: '排程' },
     { id: 'verify', label: '核銷' },
     { id: 'users', label: '帳號' },
+    { id: 'activity', label: '歷程' },
     { id: 'settings', label: '設定' },
   ];
   root.innerHTML = `
@@ -829,6 +835,7 @@ function renderAdminTab() {
     schedule: renderAdminSchedule,
     verify: renderAdminVerify,
     users: renderAdminUsers,
+    activity: renderAdminActivity,
     settings: renderAdminSettings,
   };
   const fn = handlers[state.adminTab];
@@ -996,12 +1003,12 @@ async function renderAdminMenu(content) {
 }
 
 function renderStoreFolder(store) {
-  const isCollapsed = state.collapsedStores.has(store.storeId);
+  const isExpanded = state.expandedStores.has(store.storeId);
   return `
     <section class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
       <div class="flex items-center justify-between px-4 py-3.5">
         <button data-toggle-store="${store.storeId}" class="flex flex-1 items-center gap-2 text-left">
-          <span class="text-ledger/60">${isCollapsed ? '▸' : '▾'}</span>
+          <span class="text-ledger/60">${isExpanded ? '▾' : '▸'}</span>
           <span class="font-bold text-ledger">${escapeHtml(store.name)}</span>
           <span class="text-xs text-slate-400">${store.items.length} 品項</span>
         </button>
@@ -1010,7 +1017,7 @@ function renderStoreFolder(store) {
           <button data-action="del-store" data-store="${store.storeId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-600">刪除</button>
         </div>
       </div>
-      ${!isCollapsed ? `
+      ${isExpanded ? `
         <div class="border-t border-dashed border-ledger/10 px-3 py-2">
           ${store.items.map((item) => `
             <div class="flex items-center justify-between rounded-xl px-2 py-2.5">
@@ -1029,6 +1036,76 @@ function renderStoreFolder(store) {
           </div>
         </div>` : ''}
     </section>`;
+}
+
+/* ----- 歷程記錄 ----- */
+async function renderAdminActivity(content) {
+  try {
+    const data = await api('adminGetActivityLog', { limit: 300 });
+    content.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-[11px] font-bold tracking-[.13em] text-stamp">ACTIVITY</p>
+            <h2 class="font-serif text-xl font-black">歷程記錄</h2>
+          </div>
+          <button data-action="export-activity" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">匯出 CSV</button>
+        </div>
+        <p class="text-xs text-slate-400">所有人的活動紀錄（儲值、訂餐、現金結帳、取餐、退款等），共 ${data.total} 筆。</p>
+        ${data.activities.length ? `
+        <div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+          <div class="max-h-[70dvh] overflow-y-auto">
+          ${data.activities.map((a) => `
+            <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-2.5 last:border-b-0">
+              <div class="min-w-0">
+                <p class="text-sm font-bold text-ledger">${escapeHtml(a.seatNo || a.studentNo || '')} ${escapeHtml(a.name)}</p>
+                <p class="truncate text-xs text-slate-500">${escapeHtml(a.detail) || '—'}</p>
+              </div>
+              <div class="ml-3 shrink-0 text-right">
+                <span class="rounded-full px-2 py-0.5 text-[10px] font-bold ${activityColor(a.type)}">${escapeHtml(a.type)}</span>
+                <p class="mt-0.5 text-xs font-bold tabular-nums ${a.amount < 0 ? 'text-red-600' : 'text-ledger'}">${a.amount !== 0 ? (a.amount < 0 ? '-' : '+') + '$' + money(Math.abs(a.amount)) : ''}</p>
+                <p class="text-[10px] text-slate-400">${activityTime(a.time)}</p>
+              </div>
+            </div>`).join('')}
+          </div>
+        </div>` : '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">尚無活動紀錄。</p>'}
+      </div>`;
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function activityColor(type) {
+  if (type === '儲值') return 'bg-emerald-50 text-emerald-600';
+  if (type === '現金結帳') return 'bg-stamp/10 text-stamp';
+  if (type === '取餐') return 'bg-sky-50 text-sky-600';
+  if (type === '訂餐') return 'bg-ledger/10 text-ledger';
+  if (type === '退款') return 'bg-amber-50 text-amber-600';
+  return 'bg-slate-100 text-slate-500';
+}
+
+function activityTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+async function exportActivity() {
+  const data = await api('adminGetActivityLog', { limit: 500 });
+  const rows = [['時間', '座號', '姓名', '類型', '內容', '金額']];
+  data.activities.forEach((a) => {
+    rows.push([activityTime(a.time), a.seatNo || a.studentNo, a.name, a.type, a.detail || '', String(a.amount)]);
+  });
+  const csv = rows.map((r) => r.map((c) => `"${String(c || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `歷程記錄-${todayString()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  toast('歷程已匯出。', 'success');
 }
 
 /* ----- 每日菜單（內訂） ----- */
@@ -1096,8 +1173,9 @@ async function renderAdminSchedule(content) {
             <button data-schedule-week="prev" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">‹ 上週</button>
             <button data-schedule-week="next" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">下週 ›</button>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <button data-action="week-cutoff" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">統一截止</button>
+            <button data-action="publish-internal" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">公布內訂</button>
             <button data-action="publish-week" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">一鍵公布本週</button>
           </div>
         </div>
@@ -1250,6 +1328,10 @@ function renderSettingsHtml(content) {
             <select id="remind-hours" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger">
               ${[6, 12, 24].map((h) => `<option value="${h}" ${Number(settings.overdueRemindHours) === h ? 'selected' : ''}>每 ${h} 小時提醒一次</option>`).join('')}
             </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">公告（顯示在學生「訂餐」頁上方）</label>
+            <textarea id="announcement" rows="3" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="例如：本週五中午前記得完成下週訂餐…">${escapeHtml(settings.announcement || '')}</textarea>
           </div>
           <button data-action="save-settings" class="w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">儲存設定</button>
         </div>
@@ -1668,7 +1750,7 @@ async function onClick(event) {
     return;
   }
   if (toggleStore) {
-    if (state.collapsedStores.has(toggleStore)) state.collapsedStores.delete(toggleStore); else state.collapsedStores.add(toggleStore);
+    if (state.expandedStores.has(toggleStore)) state.expandedStores.delete(toggleStore); else state.expandedStores.add(toggleStore);
     renderAdminTab();
     return;
   }
@@ -1856,6 +1938,7 @@ async function handleAction(action, target) {
     case 'add-session': openSessionEditor(target.getAttribute('data-date')); break;
     case 'edit-session': openSessionEditor(null, target.getAttribute('data-session')); break;
     case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); await refreshAdmin(); }); break;
+    case 'publish-internal': openConfirm('公布本週內訂', '公布本週所有「內訂」場次（需先公布本週一般場次）。', async () => { const r = await api('adminPublishInternalWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個內訂場次。`, 'success'); await refreshAdmin(); }); break;
     case 'publish-week': openConfirm('公布本週菜單', '公布後學生即可開始訂餐，並會推播通知。', async () => { const r = await api('adminPublishWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個場次。`, 'success'); await refreshAdmin(); }); break;
     case 'week-cutoff': openWeekCutoffModal(); break;
     case 'add-recurring': {
@@ -1942,7 +2025,8 @@ async function handleAction(action, target) {
     case 'save-settings': {
       const className = $('#class-name')?.value.trim();
       const overdueRemindHours = Number($('#remind-hours')?.value || 24);
-      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode, overdueRemindHours }); toast('設定已儲存。', 'success'); });
+      const announcement = ($('#announcement')?.value || '').trim();
+      await withAdminRefresh(async () => { await api('adminSaveSettings', { className, pureBalanceMode: state.admin.settings.pureBalanceMode, overdueRemindHours, announcement }); toast('設定已儲存。', 'success'); });
       break;
     }
     case 'view-overdue': await viewOverdue(); break;
@@ -1963,6 +2047,7 @@ async function handleAction(action, target) {
       break;
     }
     case 'export-csv': await exportCsv(); break;
+    case 'export-activity': await exportActivity(); break;
     case 'admin-add-order': {
       const sessionId = target.getAttribute('data-session');
       promptModal('管理員補單', [{ name: 'seatNo', label: '座號／學號', type: 'text', placeholder: '例如 05' }], async (v) => {
