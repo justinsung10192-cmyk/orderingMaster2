@@ -1,6 +1,7 @@
 // 動作：推播訂閱管理
 import { appError } from '../_lib/util.js';
 import { supabase } from '../_lib/db.js';
+import { sendPushToClass, pushConfigured } from '../_lib/push.js';
 
 export const actions = {
   async pushSubscribe(data, ctx) {
@@ -33,5 +34,15 @@ export const actions = {
       await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint).eq('user_id', ctx.user.id);
     }
     return { ok: true };
+  },
+
+  // 管理員主動發送全服推播通知
+  async adminBroadcast(data, ctx) {
+    const title = String(data.title || '訂餐通通知').trim().slice(0, 60) || '訂餐通通知';
+    const body = String(data.body || '').trim().slice(0, 200);
+    if (!body) throw appError('INVALID_INPUT', '請輸入通知內容。');
+    if (!pushConfigured()) throw appError('NOT_CONFIGURED', '伺服器尚未設定推播金鑰，無法發送通知。');
+    const result = await sendPushToClass(ctx.classId, { title, body, url: '/' });
+    return { ok: true, sent: result.sent, attempted: result.attempted };
   },
 };

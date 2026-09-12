@@ -865,6 +865,7 @@ async function renderAdminDashboard(content) {
           <div class="flex gap-2">
             <input type="date" id="dashboard-date" value="${data.date}" class="rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-ledger" />
             <button data-action="settle-week" class="rounded-xl bg-stamp px-3 py-2 text-xs font-bold text-white">本週結算</button>
+            <button data-action="broadcast" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">📢發送通知</button>
             <button data-action="export-csv" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">匯出 CSV</button>
           </div>
         </div>
@@ -2063,6 +2064,18 @@ async function handleAction(action, target) {
     }
     case 'export-csv': await exportCsv(); break;
     case 'export-activity': await exportActivity(); break;
+    case 'broadcast': openBroadcastModal(); break;
+    case 'send-broadcast': {
+      const title = ($('#broadcast-title')?.value || '').trim() || '訂餐通通知';
+      const body = ($('#broadcast-body')?.value || '').trim();
+      if (!body) return toast('請輸入通知內容。', 'error');
+      await busy(async () => {
+        const r = await api('adminBroadcast', { title, body });
+        closeModal();
+        toast(`已發送通知給 ${r.sent}／${r.attempted} 個裝置。`, 'success');
+      });
+      break;
+    }
     case 'admin-add-order': {
       const sessionId = target.getAttribute('data-session');
       promptModal('管理員補單', [{ name: 'seatNo', label: '座號／學號', type: 'text', placeholder: '例如 05' }], async (v) => {
@@ -2101,6 +2114,31 @@ function openWeekCutoffModal() {
     toast(`已更新 ${r.updated} 個場次的截止時間。`, 'success');
     await refreshAdmin();
   });
+}
+
+function openBroadcastModal() {
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter flex w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
+        <div class="flex items-center justify-between border-b border-ledger/10 bg-white px-5 py-4">
+          <div>
+            <p class="text-[11px] font-bold tracking-[.13em] text-slate-500">BROADCAST</p>
+            <h2 class="font-serif text-xl font-black">發送全服通知</h2>
+          </div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="px-5 py-4">
+          <label class="mb-1 block text-xs font-bold text-slate-500">標題</label>
+          <input id="broadcast-title" maxlength="60" value="訂餐通通知" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+          <label class="mb-1 block text-xs font-bold text-slate-500">內容</label>
+          <textarea id="broadcast-body" rows="4" maxlength="200" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="例如：明天記得帶餐盒…"></textarea>
+          <p class="mt-2 text-xs text-slate-400">將推播給全班已開啟通知的裝置。</p>
+        </div>
+        <div class="border-t border-ledger/10 bg-white px-5 py-4">
+          <button data-action="send-broadcast" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">發送通知</button>
+        </div>
+      </section>
+    </div>`;
 }
 
 /* ============================ 品項編輯 / AI 辨識 ============================ */
