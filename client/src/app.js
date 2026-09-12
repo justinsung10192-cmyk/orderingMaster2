@@ -441,6 +441,7 @@ function renderOrderSheet() {
   const isAdmin = Boolean(draft.adminFor);
   const insufficient = session.pureBalanceMode && total > balance;
   const cutoffPassed = !isAdmin && cutoffRemaining(session.cutoffTime).passed;
+  const prevScroll = document.getElementById('sheet-scroll')?.scrollTop || 0;
 
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
@@ -455,7 +456,7 @@ function renderOrderSheet() {
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
 
-        <div class="flex-1 overflow-y-auto px-4 py-4">
+        <div id="sheet-scroll" class="flex-1 overflow-y-auto px-4 py-4">
           ${session.menuItems.length ? session.menuItems.map((item) => renderMenuItem(item)).join('') : '<p class="py-10 text-center text-sm text-slate-400">此店家尚無餐點。</p>'}
         </div>
 
@@ -490,6 +491,9 @@ function renderOrderSheet() {
         </div>
       </section>
     </div>`;
+
+  const scrollEl = document.getElementById('sheet-scroll');
+  if (scrollEl) scrollEl.scrollTop = prevScroll;
 
   $('#use-wallet')?.addEventListener('change', (event) => { state.orderDraft.useWallet = event.target.checked; });
   $('#order-note')?.addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
