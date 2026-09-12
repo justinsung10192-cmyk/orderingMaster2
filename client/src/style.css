@@ -31,3 +31,7 @@ button:active { transform: scale(.97); }
 body.is-busy { cursor: wait; }
 body.is-busy button, body.is-busy [data-action] { pointer-events: none !important; }
 body.is-busy::after { content: ''; position: fixed; inset: 0; background: rgba(248,245,238,.45); z-index: 9990; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin .7s linear infinite; display: inline-block; }
+body.is-busy::before { content: ''; position: fixed; left: 50%; top: 50%; width: 42px; height: 42px; margin: -21px 0 0 -21px; border: 4px solid rgba(23,59,98,.15); border-top-color: #173B62; border-radius: 9999px; z-index: 9991; animation: spin .7s linear infinite; }

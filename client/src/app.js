@@ -245,7 +245,7 @@ function render() {
             <div><p class="font-serif text-base font-black leading-5">訂餐通</p><p id="header-subtitle" class="text-[11px] text-slate-500">${state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳'}</p></div>
           </button>
           <div class="flex items-center gap-2">
-            <button data-action="manual-refresh" class="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-black text-ledger shadow-sm ring-1 ring-ledger/5" title="重新整理">↻</button>
+            <button data-action="manual-refresh" class="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-black text-ledger shadow-sm ring-1 ring-ledger/5" title="重新整理"><span id="refresh-icon" class="inline-block">↻</span></button>
             <button data-nav="settings" class="flex items-center gap-2 rounded-full bg-white px-2 py-1.5 shadow-sm ring-1 ring-ledger/5">
               <span class="grid h-7 w-7 place-items-center rounded-full bg-ledger text-xs font-bold text-white">${escapeHtml((state.user.seatNo || '?').slice(-2))}</span>
               ${headerWallet}
@@ -2096,11 +2096,19 @@ async function refreshAdmin() {
 }
 
 async function manualRefresh() {
+  const icon = $('#refresh-icon');
+  if (icon) icon.classList.add('spin');
   try {
-    await refreshBoot();
-  } catch (_) {}
-  renderView();
-  toast('已重新整理。', 'success');
+    await busy(async () => {
+      await refreshBoot();
+      renderView();
+    });
+    toast('已重新整理。', 'success');
+  } catch (error) {
+    toast(error?.message || '重新整理失敗，請再試一次。', 'error');
+  } finally {
+    if (icon) icon.classList.remove('spin');
+  }
 }
 
 function openWeekCutoffModal() {
