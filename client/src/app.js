@@ -105,6 +105,8 @@ function tickCountdowns() {
 
 /* ============================ 登入 / 首次設定 ============================ */
 function renderAuth() {
+  let remember = null;
+  try { remember = JSON.parse(localStorage.getItem('meal.remember') || 'null'); } catch (_) {}
   app.innerHTML = `
     <main class="min-h-dvh bg-paper relative overflow-hidden">
       <div class="absolute inset-x-0 top-0 h-[34%] bg-ledger"></div>
@@ -121,12 +123,15 @@ function renderAuth() {
           <form id="login-form" class="space-y-4 px-7 py-7">
             <div>
               <label class="mb-1 block text-xs font-bold text-slate-500">座號</label>
-              <input name="studentNo" inputmode="numeric" class="w-full rounded-xl border border-slate-200 px-4 py-3 text-lg outline-none focus:border-ledger" placeholder="例如 01" autocomplete="username" />
+              <input name="studentNo" inputmode="numeric" value="${escapeHtml(remember?.studentNo || '')}" class="w-full rounded-xl border border-slate-200 px-4 py-3 text-lg outline-none focus:border-ledger" placeholder="例如 01" autocomplete="username" />
             </div>
             <div>
               <label class="mb-1 block text-xs font-bold text-slate-500">密碼</label>
-              <input name="password" type="password" class="w-full rounded-xl border border-slate-200 px-4 py-3 text-lg outline-none focus:border-ledger" placeholder="••••••••" autocomplete="current-password" />
+              <input name="password" type="password" value="${escapeHtml(remember?.password || '')}" class="w-full rounded-xl border border-slate-200 px-4 py-3 text-lg outline-none focus:border-ledger" placeholder="••••••••" autocomplete="current-password" />
             </div>
+            <label class="flex items-center gap-2 text-xs font-bold text-slate-500">
+              <input type="checkbox" id="remember-pw" class="h-4 w-4 accent-ledger" ${remember ? 'checked' : ''} />記住密碼（下次自動帶入）
+            </label>
             <button type="submit" class="w-full rounded-xl bg-ledger py-3.5 text-sm font-bold text-white">登入</button>
             <p class="text-center text-xs leading-5 text-slate-400">首次登入請使用預設密碼，登入後系統會要求你修改。</p>
           </form>
@@ -147,6 +152,9 @@ async function onLogin(event) {
       state.token = result.token;
       state.user = result.user;
       localStorage.setItem('meal.token', result.token);
+      const rememberPw = $('#remember-pw')?.checked || false;
+      if (rememberPw) localStorage.setItem('meal.remember', JSON.stringify({ studentNo, password }));
+      else localStorage.removeItem('meal.remember');
       if (result.user.mustChangePassword) {
         renderSetup();
       } else {
@@ -680,7 +688,7 @@ async function toggleVote(storeId) {
         toast(`已投給「${store.name}」！`);
       }
       state.boot = await api('getBootstrap');
-      render();
+      renderView();
     });
   } catch (error) {
     toast(error.message, 'error');
@@ -1680,18 +1688,25 @@ function closeModal() {
   if (state.scanner) { try { state.scanner.stop(); } catch (_) {} state.scanner = null; }
 }
 
+function syncHeader() {
+  const walletEl = $('#header-wallet');
+  if (walletEl) walletEl.textContent = fmtMoney(state.user.walletBalance);
+  const subEl = $('#header-subtitle');
+  if (subEl) subEl.textContent = state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳';
+}
+
 async function refreshBoot() {
   state.boot = await api('getBootstrap');
   state.user = state.boot.user;
-  const el = $('#header-wallet');
-  if (el) el.textContent = fmtMoney(state.user.walletBalance);
+  syncHeader();
 }
 
 async function withAdminRefresh(fn) {
   await busy(async () => {
     await fn();
     state.boot = await api('getBootstrap');
-    render();
+    syncHeader();
+    renderView();
   });
 }
 
@@ -1844,7 +1859,7 @@ async function openDutyEditor(date) {
       else await api('adminClearDuty', { date });
       closeModal();
       toast('值日生已更新。', 'success');
-      render();
+      renderView();
     });
   });
 }
@@ -1977,7 +1992,7 @@ async function handleAction(action, target) {
         const last = state.admin.lastVerify;
         if (last) last.todayOrders.forEach((order) => { if (order.orderId === orderId) order.pickupStatus = 'PickedUp'; });
         toast('已標記取餐。', 'success');
-        render();
+        renderView();
       });
       break;
     }
@@ -1990,7 +2005,7 @@ async function handleAction(action, target) {
         const last = state.admin.lastVerify;
         if (last) { last.unpaidOrders = []; last.totalDebt = 0; }
         toast('已現金結清。', 'success');
-        render();
+        renderView();
       });
       break;
     }
@@ -2059,14 +2074,15 @@ async function handleAction(action, target) {
 async function refreshAdmin() {
   state.boot = await api('getBootstrap');
   state.user = state.boot.user;
-  render();
+  syncHeader();
+  renderView();
 }
 
 async function manualRefresh() {
   try {
     await refreshBoot();
   } catch (_) {}
-  render();
+  renderView();
   toast('已重新整理。', 'success');
 }
 
@@ -2136,7 +2152,7 @@ async function saveItem(itemId) {
     await busy(async () => {
       await api('adminSaveMenuItem', { storeId, itemId: itemId || undefined, name, price, options });
       closeModal();
-      render();
+      renderView();
     });
   } catch (error) {
     toast(error.message, 'error');
@@ -2489,7 +2505,7 @@ async function saveAiItems(storeId) {
       const result = await api('adminBatchSaveMenuItems', { storeId, items });
       closeModal();
       toast(`已寫入 ${result.created} 個品項。`, 'success');
-      render();
+      renderView();
     });
   } catch (error) {
     toast(error.message, 'error');
