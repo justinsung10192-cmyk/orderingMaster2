@@ -2124,7 +2124,16 @@ function openWeekCutoffModal() {
   });
 }
 
-function openBroadcastModal() {
+async function openBroadcastModal() {
+  let statusLine = '查詢推播訂閱中…';
+  try {
+    const status = await api('adminGetPushStatus');
+    statusLine = status.configured
+      ? `目前已有 ${status.userCount} 人開啟通知（${status.deviceCount} 台裝置）。`
+      : '伺服器尚未設定推播金鑰，無法發送通知。';
+  } catch (_) {
+    statusLine = '無法查詢推播訂閱狀態。';
+  }
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
       <section class="sheet-enter flex w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
@@ -2140,7 +2149,7 @@ function openBroadcastModal() {
           <input id="broadcast-title" maxlength="60" value="訂餐通通知" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
           <label class="mb-1 block text-xs font-bold text-slate-500">內容</label>
           <textarea id="broadcast-body" rows="4" maxlength="200" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="例如：明天記得帶餐盒…"></textarea>
-          <p class="mt-2 text-xs text-slate-400">將推播給全班已開啟通知的裝置。</p>
+          <p class="mt-2 text-xs text-slate-400">${escapeHtml(statusLine)}</p>
         </div>
         <div class="border-t border-ledger/10 bg-white px-5 py-4">
           <button data-action="send-broadcast" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">發送通知</button>

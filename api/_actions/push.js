@@ -36,6 +36,17 @@ export const actions = {
     return { ok: true };
   },
 
+  // 管理員查詢推播訂閱狀態（可接收通知的人數／裝置數）
+  async adminGetPushStatus(_data, ctx) {
+    const configured = pushConfigured();
+    const { data: subscriptions, error } = await supabase.from('push_subscriptions').select('user_id').eq('class_id', ctx.classId);
+    if (error) throw appError('DB_ERROR', '查詢推播訂閱失敗。');
+    const rows = subscriptions || [];
+    const deviceCount = rows.length;
+    const userCount = new Set(rows.map((s) => s.user_id).filter(Boolean)).size;
+    return { ok: true, configured, deviceCount, userCount };
+  },
+
   // 管理員主動發送全服推播通知
   async adminBroadcast(data, ctx) {
     const title = String(data.title || '訂餐通通知').trim().slice(0, 60) || '訂餐通通知';

@@ -9,8 +9,9 @@ import { materializeRecurring } from './_actions/sessions.js';
 export const config = { api: { bodyParser: false } };
 
 function fmtTime(iso) {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // 通知內顯示「台灣時間」（伺服器可能跑在 UTC）
+  const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 export default async function handler(req, res) {
@@ -55,19 +56,30 @@ export default async function handler(req, res) {
       .lte('cutoff_time', horizon)
       .gte('cutoff_time', new Date(now).toISOString());
     if (!cutoffErr) {
+      // 依「台灣時間 HH:MM」分組：同時截止的多個場次只對每個人發一則通知
+      const groups = new Map(); // time -> { sessions: [], userIds: Set }
       for (const session of cutoffSessions || []) {
+        const time = fmtTime(session.cutoff_time);
+        if (!groups.has(time)) groups.set(time, { sessions: [], userIds: new Set() });
+        const group = groups.get(time);
+        group.sessions.push(session);
         const orders = await listRowsIn('orders', 'session_id', [session.id], { classId: session.class_id });
-        const userIds = [...new Set(orders.map((order) => order.user_id).filter((value) => value != null))];
-        const store = await findOne('stores', { id: session.store_id }, session.class_id);
-        for (const userId of userIds) {
+        for (const order of orders) {
+          if (order.user_id != null) group.userIds.add(order.user_id);
+        }
+      }
+      for (const [time, group] of groups) {
+        for (const userId of group.userIds) {
           await sendPushToUser(Number(userId), {
             title: '訂餐即將截止',
-            body: `「${store?.name || '訂餐'}」將於 ${fmtTime(session.cutoff_time)} 截止，記得確認訂單。`,
+            body: `你的訂餐將於 ${time} 截止，記得確認訂單。`,
             url: '/',
           });
           result.cutoffReminders += 1;
         }
-        await updateRows('sessions', { id: session.id }, { cutoff_reminder_sent: true });
+        for (const session of group.sessions) {
+          await updateRows('sessions', { id: session.id }, { cutoff_reminder_sent: true });
+        }
       }
     }
 

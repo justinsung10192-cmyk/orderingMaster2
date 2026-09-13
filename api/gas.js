@@ -85,6 +85,7 @@ const ADMIN = new Set([
   'adminClearDuty',
   'adminRestoreBackup',
   'adminBroadcast',
+  'adminGetPushStatus',
 ]);
 
 export const config = { api: { bodyParser: false } };
