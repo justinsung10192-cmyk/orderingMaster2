@@ -48,16 +48,38 @@ function calendarPrompt(month) {
 5. title 簡潔扼要。沒有辨識到任何事件時輸出空陣列 []。`;
 }
 
-function normalizeCalendar(parsed) {
+function coerceCalendarDate(raw, year, mon) {
+  const s = String(raw || '').trim();
+  const full = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (full) {
+    const m = Number(full[2]); const d = Number(full[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return `${full[1]}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return null;
+  }
+  const md = s.match(/^(\d{1,2})\s*[/\-月]\s*(\d{1,2})\s*日?$/);
+  if (md) {
+    const m = Number(md[1]); const d = Number(md[2]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return null;
+  }
+  if (/^\d{1,2}$/.test(s)) {
+    const d = Number(s);
+    if (d >= 1 && d <= 31) return `${year}-${String(Number(mon)).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return null;
+  }
+  return null;
+}
+
+function normalizeCalendar(parsed, year, mon) {
   const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.events) ? parsed.events : []);
   return list
     .map((event) => ({
-      date: String(event?.date || '').trim(),
+      date: coerceCalendarDate(event?.date, year, mon) || '',
       title: String(event?.title || '').trim(),
       category: ['考試', '作業', '活動', '其他'].includes(event?.category) ? event?.category : '其他',
       description: String(event?.description || '').trim(),
     }))
-    .filter((event) => /^\d{4}-\d{2}-\d{2}$/.test(event.date) && event.title)
+    .filter((event) => event.date && event.title)
     .slice(0, 100);
 }
 
@@ -392,7 +414,9 @@ export const actions = {
     const { imageBase64, mimeType } = validateImage(data);
     const month = String(data.month || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇月份。');
-    const { provider, result } = await recognize(imageBase64, mimeType, calendarPrompt(month), normalizeCalendar);
+    const [year, mon] = month.split('-');
+    const normalizer = (parsed) => normalizeCalendar(parsed, year, mon);
+    const { provider, result } = await recognize(imageBase64, mimeType, calendarPrompt(month), normalizer);
     return { provider, events: result };
   },
 };

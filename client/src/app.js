@@ -2197,7 +2197,11 @@ async function renderCalendarView(root) {
     root.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
     return;
   }
-  renderCalendarContent(root);
+  try {
+    renderCalendarContent(root);
+  } catch (error) {
+    root.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
   requestAnimationFrame(() => window.scrollTo(0, prevScroll));
 }
 
@@ -2345,13 +2349,18 @@ async function saveCalendarEvent() {
   const date = ($('#calendar-date')?.value || '').trim();
   const description = ($('#calendar-desc')?.value || '').trim();
   const id = state.calendarEditingId;
-  await busy(async () => {
-    if (id) await api('calendarUpdate', { id, title, date, description, category: state.calendarCategory });
-    else await api('calendarCreate', { title, date, description, category: state.calendarCategory });
-    closeModal();
+  closeModal();
+  try {
+    await busy(async () => {
+      if (id) await api('calendarUpdate', { id, title, date, description, category: state.calendarCategory });
+      else await api('calendarCreate', { title, date, description, category: state.calendarCategory });
+      await renderCalendarView($('#view'));
+    });
     toast(id ? '事件已更新。' : '事件已新增。', 'success');
+  } catch (error) {
+    toast(error.message, 'error');
     await renderCalendarView($('#view'));
-  });
+  }
 }
 
 function openCalendarAi() {
@@ -2450,19 +2459,23 @@ function renderCalendarAiList() {
 }
 
 async function saveCalendarAiEvents() {
-  const events = state.calendarAiEvents || [];
+  const events = (state.calendarAiEvents || []).filter((ev) => ev.title && /^\d{4}-\d{2}-\d{2}$/.test(ev.date));
   if (!events.length) return toast('沒有可新增的事件。', 'error');
+  closeModal();
   let created = 0;
+  let failed = 0;
   await busy(async () => {
-    for (const ev of events) {
-      if (!ev.title || !/^\d{4}-\d{2}-\d{2}$/.test(ev.date)) continue;
-      await api('calendarCreate', { title: ev.title, date: ev.date, category: ev.category, description: ev.description || '' });
-      created += 1;
-    }
-    closeModal();
-    toast(`已新增 ${created} 個事件。`, 'success');
+    const results = await Promise.all(events.map(async (ev) => {
+      try {
+        await api('calendarCreate', { title: ev.title, date: ev.date, category: ev.category, description: ev.description || '' });
+        return true;
+      } catch (_) { return false; }
+    }));
+    created = results.filter(Boolean).length;
+    failed = results.filter((r) => !r).length;
     await renderCalendarView($('#view'));
   });
+  toast(`已新增 ${created} 個事件${failed ? `、${failed} 個失敗` : ''}。`, failed ? 'info' : 'success');
 }
 
 /* ============================ 品項編輯 / AI 辨識 ============================ */
