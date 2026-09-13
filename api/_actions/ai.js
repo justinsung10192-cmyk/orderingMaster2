@@ -36,6 +36,31 @@ function monthlyPrompt(month) {
 8. 放假/節日（如中秋節、教師節）那天不要產生 items；若完全沒有辨識到資料，輸出空陣列 []。`;
 }
 
+function calendarPrompt(month) {
+  const [year, mon] = month.split('-');
+  return `你是班級行事曆辨識助手。請辨識這張行事曆/通知圖片中的「事件」。這份資料的年份月份是 ${year} 年 ${Number(mon)} 月，所有日期都以此為準。
+規則：
+1. 只輸出一個 JSON 陣列，不要有任何其他文字、Markdown 或註解。
+2. 每個事件是一個物件，格式為：
+   {"date":"YYYY-MM-DD","title":"事件名稱","category":"考試|作業|活動|其他","description":"補充說明（沒有則空字串）"}
+3. category 判斷：段考/期中/期末/模擬考/小考/測驗 →「考試」；作業/報告/習題/繳交/作文 →「作業」；比賽/出遊/集會/演講/園遊會/運動會/講座 →「活動」；其餘 →「其他」。
+4. date 的年份一定是 ${year} 年。若只有日期（如 9/15）請補齊年份；若只有星期，請推算出 ${year} 年 ${Number(mon)} 月的具體日期。
+5. title 簡潔扼要。沒有辨識到任何事件時輸出空陣列 []。`;
+}
+
+function normalizeCalendar(parsed) {
+  const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.events) ? parsed.events : []);
+  return list
+    .map((event) => ({
+      date: String(event?.date || '').trim(),
+      title: String(event?.title || '').trim(),
+      category: ['考試', '作業', '活動', '其他'].includes(event?.category) ? event?.category : '其他',
+      description: String(event?.description || '').trim(),
+    }))
+    .filter((event) => /^\d{4}-\d{2}-\d{2}$/.test(event.date) && event.title)
+    .slice(0, 100);
+}
+
 // 選項正規化：支援新格式（required 群組 + optional）與舊格式（options 扁平陣列）
 // 一律輸出扁平陣列 [{name, price, required, group}]；required=true 表示必選（同 group 內擇一）
 function normalizeItemOptions(item) {
@@ -360,5 +385,14 @@ export const actions = {
     if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇菜單月份。');
     const { provider, result } = await recognize(imageBase64, mimeType, monthlyPrompt(month), normalizeMonthly);
     return { provider, entries: result };
+  },
+
+  // 行事曆 AI 辨識：從照片/通知中辨識事件（日期、名稱、類別）
+  async calendarAiRecognize(data) {
+    const { imageBase64, mimeType } = validateImage(data);
+    const month = String(data.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇月份。');
+    const { provider, result } = await recognize(imageBase64, mimeType, calendarPrompt(month), normalizeCalendar);
+    return { provider, events: result };
   },
 };

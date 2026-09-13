@@ -12,6 +12,7 @@ import { actions as votesActions } from './_actions/votes.js';
 import { actions as adminActions } from './_actions/admin.js';
 import { actions as aiActions } from './_actions/ai.js';
 import { actions as pushActions } from './_actions/push.js';
+import { actions as calendarActions } from './_actions/calendar.js';
 
 const HANDLERS = {
   ...authActions,
@@ -24,6 +25,7 @@ const HANDLERS = {
   ...adminActions,
   ...aiActions,
   ...pushActions,
+  ...calendarActions,
 };
 
 const PUBLIC = new Set(['getPublicConfig', 'login']);
@@ -86,6 +88,7 @@ const ADMIN = new Set([
   'adminRestoreBackup',
   'adminBroadcast',
   'adminGetPushStatus',
+  'calendarLogs',
 ]);
 
 export const config = { api: { bodyParser: false } };

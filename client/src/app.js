@@ -33,10 +33,14 @@ const state = {
   scanner: null,
   deferredInstall: null,
   push: { supported: false, subscribed: false },
+  calendar: { month: todayString().slice(0, 7), events: [], logs: [], showLogs: false },
+  calendarEditingId: null,
+  calendarCategory: '其他',
+  calendarAiEvents: [],
   busy: false,
 };
 
-const ICONS = { order: '⌑', vote: '♡', wallet: '¤', admin: '✓', settings: '☷' };
+const ICONS = { order: '⌑', vote: '♡', calendar: '▦', wallet: '¤', admin: '✓', settings: '☷' };
 
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.1.0'; // 由 vite.config.ts 於建置時注入
 
@@ -228,6 +232,7 @@ function render() {
   const navItems = [
     { id: 'order', label: '訂餐', icon: ICONS.order },
     { id: 'vote', label: '投票', icon: ICONS.vote },
+    { id: 'calendar', label: '行事曆', icon: ICONS.calendar },
     { id: 'wallet', label: '個人', icon: ICONS.wallet },
     ...(state.user.role === 'Admin' ? [{ id: 'admin', label: '管理', icon: ICONS.admin }] : []),
     { id: 'settings', label: '設定', icon: ICONS.settings },
@@ -276,6 +281,7 @@ function renderView() {
   if (!view) return;
   if (state.view === 'order') return renderOrderView(view);
   if (state.view === 'vote') return renderVoteView(view);
+  if (state.view === 'calendar') return renderCalendarView(view);
   if (state.view === 'wallet') return renderWalletView(view);
   if (state.view === 'admin') return renderAdminView(view);
   if (state.view === 'settings') return renderSettingsView(view);
@@ -1904,6 +1910,15 @@ async function handleAction(action, target) {
     case 'change-name': promptModal('修改姓名', [{ name: 'studentName', label: '姓名', value: state.user.name }], async (v) => { const r = await api('updateProfile', { studentName: v.studentName }); state.user = r.user; render(); toast('姓名已更新。', 'success'); }); break;
     case 'logout': doLogout(); break;
 
+    // 行事曆
+    case 'calendar-add': openCalendarEventModal(); break;
+    case 'calendar-edit': openCalendarEventModal(target.getAttribute('data-id')); break;
+    case 'calendar-del': openConfirm('刪除事件', '確定要刪除這個事件嗎？', async () => { await api('calendarDelete', { id: target.getAttribute('data-id') }); toast('事件已刪除。', 'success'); await renderCalendarView($('#view')); }); break;
+    case 'calendar-save': await saveCalendarEvent(); break;
+    case 'calendar-ai': openCalendarAi(); break;
+    case 'calendar-logs': state.calendar.showLogs = !state.calendar.showLogs; await renderCalendarView($('#view')); break;
+    case 'save-calendar-ai': await saveCalendarAiEvents(); break;
+    case 'del-calendar-ai': { const idx = Number(target.getAttribute('data-index')); state.calendarAiEvents.splice(idx, 1); renderCalendarAiList(); break; }
     // 管理員 - 菜單
     case 'add-store': promptModal('新增店家', [{ name: 'name', label: '店家名稱' }], async (v) => { await api('adminSaveStore', { name: v.name }); render(); }); break;
     case 'edit-store': {
@@ -2156,6 +2171,271 @@ async function openBroadcastModal() {
         </div>
       </section>
     </div>`;
+}
+
+/* ============================ 班級行事曆 ============================ */
+function categoryBadge(category) {
+  const map = { '考試': 'bg-red-50 text-red-600', '作業': 'bg-amber-50 text-amber-600', '活動': 'bg-emerald-50 text-emerald-600', '其他': 'bg-slate-100 text-slate-500' };
+  return map[category] || map['其他'];
+}
+
+function calendarActionLabel(action) {
+  return { create: '新增', update: '修改', delete: '刪除' }[action] || action;
+}
+
+async function renderCalendarView(root) {
+  try {
+    const data = await api('calendarList', { month: state.calendar.month });
+    state.calendar.events = data.events || [];
+    if (state.user.role === 'Admin' && state.calendar.showLogs) {
+      const logs = await api('calendarLogs', { limit: 100 });
+      state.calendar.logs = logs.logs || [];
+    }
+  } catch (error) {
+    root.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+  renderCalendarContent(root);
+}
+
+function renderCalendarContent(root) {
+  const isAdmin = state.user.role === 'Admin';
+  const month = state.calendar.month;
+  const events = state.calendar.events || [];
+  const showLogs = isAdmin && state.calendar.showLogs;
+  const dates = [...new Set(events.map((e) => e.date))].sort();
+  const grouped = dates.map((date) => ({ date, items: events.filter((e) => e.date === date) }));
+
+  root.innerHTML = `
+    <section class="view-enter space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-[11px] font-bold tracking-[.13em] text-stamp">CALENDAR</p>
+          <h2 class="font-serif text-xl font-black">班級行事曆</h2>
+        </div>
+        <button data-action="calendar-add" class="rounded-xl bg-stamp px-4 py-2.5 text-xs font-bold text-white">＋ 新增事件</button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <input id="calendar-month" type="month" value="${escapeHtml(month)}" class="w-36 rounded-xl border border-slate-200 px-2 py-2 text-sm outline-none focus:border-ledger" />
+        <button data-action="calendar-ai" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">📷 AI 辨識新增</button>
+        ${isAdmin ? `<button data-action="calendar-logs" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">${showLogs ? '← 返回行事曆' : '歷史紀錄'}</button>` : ''}
+      </div>
+      ${showLogs ? renderCalendarLogsHtml() : renderCalendarEventsHtml(grouped)}
+    </section>`;
+  $('#calendar-month')?.addEventListener('change', async (e) => {
+    state.calendar.month = e.target.value;
+    await renderCalendarView($('#view'));
+  });
+}
+
+function renderCalendarEventsHtml(grouped) {
+  if (!grouped.length) return '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">這個月尚無事件，點「＋ 新增事件」或「AI 辨識」開始。</p>';
+  return grouped.map((group) => `
+    <div>
+      <p class="mb-1.5 text-xs font-bold text-slate-500">${escapeHtml(monthDay(group.date))} ${escapeHtml(weekdayName(group.date))}</p>
+      <div class="space-y-2">
+        ${group.items.map((ev) => {
+          const canEdit = state.user.role === 'Admin' || String(ev.userId) === String(state.user.id);
+          return `
+          <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <p class="font-bold leading-6 text-ledger">${escapeHtml(ev.title)} <span class="ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${categoryBadge(ev.category)}">${escapeHtml(ev.category)}</span></p>
+                ${ev.description ? `<p class="mt-0.5 whitespace-pre-line text-xs leading-5 text-slate-500">${escapeHtml(ev.description)}</p>` : ''}
+                <p class="mt-1 text-[11px] text-slate-400">由 ${escapeHtml(ev.ownerSeat || '')}${ev.ownerSeat && ev.ownerName ? ' ' : ''}${escapeHtml(ev.ownerName || '')} 新增</p>
+              </div>
+              ${canEdit ? `
+              <div class="flex shrink-0 gap-1.5">
+                <button data-action="calendar-edit" data-id="${ev.id}" class="grid h-8 w-8 place-items-center rounded-lg bg-mist text-sm text-ledger">✎</button>
+                <button data-action="calendar-del" data-id="${ev.id}" class="grid h-8 w-8 place-items-center rounded-lg bg-red-50 text-sm text-red-600">✕</button>
+              </div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function renderCalendarLogsHtml() {
+  const logs = state.calendar.logs || [];
+  if (!logs.length) return '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">尚無歷史紀錄。</p>';
+  return `<div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+    ${logs.map((log) => `
+    <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-2.5 last:border-b-0">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-ledger">${escapeHtml(log.userLabel || '已刪除帳號')} <span class="text-xs font-normal text-slate-400">${calendarActionLabel(log.action)}</span></p>
+        <p class="truncate text-xs text-slate-500">${escapeHtml(log.detail)}</p>
+      </div>
+      <span class="ml-3 shrink-0 text-[10px] text-slate-400">${activityTime(log.time)}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+function openCalendarEventModal(id) {
+  const events = state.calendar.events || [];
+  const ev = id ? events.find((e) => String(e.id) === String(id)) : null;
+  const date = ev?.date || todayString();
+  const cats = ['考試', '作業', '活動', '其他'];
+  state.calendarEditingId = id || null;
+  state.calendarCategory = ev?.category || '其他';
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
+        <div class="flex items-center justify-between border-b border-ledger/10 bg-white px-5 py-4">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">EVENT</p><h2 class="font-serif text-xl font-black">${ev ? '編輯事件' : '新增事件'}</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="flex-1 overflow-y-auto px-5 py-4">
+          <label class="mb-1 block text-xs font-bold text-slate-500">事件名稱</label>
+          <input id="calendar-title" maxlength="80" value="${escapeHtml(ev?.title || '')}" placeholder="例如：第二次段考" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+          <label class="mb-1 block text-xs font-bold text-slate-500">日期</label>
+          <input id="calendar-date" type="date" value="${escapeHtml(date)}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+          <label class="mb-1 block text-xs font-bold text-slate-500">類別</label>
+          <div class="mb-3 flex flex-wrap gap-2" id="calendar-cats">
+            ${cats.map((c) => `<button type="button" data-cat="${c}" class="rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${state.calendarCategory === c ? 'bg-stamp text-white ring-stamp' : 'bg-mist text-ledger ring-ledger/10'}">${c}</button>`).join('')}
+          </div>
+          <label class="mb-1 block text-xs font-bold text-slate-500">說明（可選）</label>
+          <textarea id="calendar-desc" rows="3" maxlength="300" placeholder="例如：考國文、英文" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger">${escapeHtml(ev?.description || '')}</textarea>
+        </div>
+        <div class="border-t border-ledger/10 bg-white px-5 py-4">
+          <button data-action="calendar-save" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">${ev ? '儲存修改' : '新增事件'}</button>
+        </div>
+      </section>
+    </div>`;
+  modalRoot.querySelectorAll('#calendar-cats [data-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.calendarCategory = btn.getAttribute('data-cat');
+      modalRoot.querySelectorAll('#calendar-cats [data-cat]').forEach((b) => {
+        const active = b.getAttribute('data-cat') === state.calendarCategory;
+        b.className = `rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${active ? 'bg-stamp text-white ring-stamp' : 'bg-mist text-ledger ring-ledger/10'}`;
+      });
+    });
+  });
+}
+
+async function saveCalendarEvent() {
+  const title = ($('#calendar-title')?.value || '').trim();
+  const date = ($('#calendar-date')?.value || '').trim();
+  const description = ($('#calendar-desc')?.value || '').trim();
+  const id = state.calendarEditingId;
+  await busy(async () => {
+    if (id) await api('calendarUpdate', { id, title, date, description, category: state.calendarCategory });
+    else await api('calendarCreate', { title, date, description, category: state.calendarCategory });
+    closeModal();
+    toast(id ? '事件已更新。' : '事件已新增。', 'success');
+    await renderCalendarView($('#view'));
+  });
+}
+
+function openCalendarAi() {
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI OCR · 行事曆</p><h2 class="font-serif text-xl font-black">AI 辨識事件</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="mt-4">
+          <label class="mb-1 block text-xs font-bold text-slate-500">資料月份（決定日期年份）</label>
+          <input id="calai-month" type="month" value="${state.calendar.month}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+        </div>
+        <p class="text-xs font-bold text-slate-500">選擇照片（行事曆、班級通知、課表…）：</p>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-7">
+            <span class="text-3xl">📷</span><span class="mt-2 text-sm font-bold text-ledger">拍照</span><span class="mt-1 text-xs text-slate-400">開啟相機</span>
+            <input id="calai-camera" type="file" accept="image/*" capture="environment" class="hidden" />
+          </label>
+          <label class="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-ledger/20 bg-mist/50 px-4 py-7">
+            <span class="text-3xl">🖼️</span><span class="mt-2 text-sm font-bold text-ledger">上傳圖片</span><span class="mt-1 text-xs text-slate-400">從相簿選擇</span>
+            <input id="calai-upload" type="file" accept="image/*" class="hidden" />
+          </label>
+        </div>
+        <p id="calai-status" class="mt-3 text-center text-xs text-slate-400">AI 會辨識事件名稱、日期與類別（考試／作業／活動／其他）。</p>
+      </section>
+    </div>`;
+  $('#calai-camera').addEventListener('change', (e) => handleCalendarAiFile(e));
+  $('#calai-upload').addEventListener('change', (e) => handleCalendarAiFile(e));
+}
+
+async function handleCalendarAiFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const month = ($('#calai-month')?.value || state.calendar.month).trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) return toast('請選擇月份。', 'error');
+  const statusEl = $('#calai-status');
+  if (statusEl) statusEl.textContent = '圖片處理中…';
+  try {
+    const { imageBase64, mimeType } = await compressImage(file);
+    if (statusEl) statusEl.textContent = '辨識中，請稍候…';
+    const result = await api('calendarAiRecognize', { imageBase64, mimeType, month });
+    showCalendarAiPreview(result.events);
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message;
+    else toast(error.message, 'error');
+  }
+}
+
+function showCalendarAiPreview(events) {
+  if (!events.length) { toast('沒有辨識到任何事件。', 'error'); closeModal(); return; }
+  state.calendarAiEvents = events.map((ev) => ({ ...ev, category: ev.category || '其他' }));
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-paper">
+        <div class="flex items-center justify-between border-b border-ledger/10 bg-white px-5 py-4">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">PREVIEW</p><h2 class="font-serif text-xl font-black">辨識結果（${state.calendarAiEvents.length}）</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="flex-1 overflow-y-auto px-4 py-3" id="calai-list"></div>
+        <div class="border-t border-ledger/10 bg-white px-5 py-4">
+          <button data-action="save-calendar-ai" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">確認新增（${state.calendarAiEvents.length} 個事件）</button>
+        </div>
+      </section>
+    </div>`;
+  renderCalendarAiList();
+}
+
+function renderCalendarAiList() {
+  const listEl = $('#calai-list');
+  if (!listEl) return;
+  const cats = ['考試', '作業', '活動', '其他'];
+  listEl.innerHTML = state.calendarAiEvents.map((ev, i) => `
+    <div class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-ledger/5">
+      <div class="flex items-center gap-1.5">
+        <input data-calai-date="${i}" type="date" value="${escapeHtml(ev.date)}" class="w-36 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-ledger outline-none focus:border-ledger" />
+        <input data-calai-title="${i}" value="${escapeHtml(ev.title)}" placeholder="事件名稱" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+        <button data-action="del-calendar-ai" data-index="${i}" class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-red-50 text-xs text-red-500">×</button>
+      </div>
+      <div class="mt-1.5 flex flex-wrap gap-1.5">
+        ${cats.map((c) => `<button type="button" data-calai-cat="${i}-${c}" class="rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ${ev.category === c ? 'bg-stamp text-white ring-stamp' : 'bg-mist text-ledger ring-ledger/10'}">${c}</button>`).join('')}
+      </div>
+      <input data-calai-desc="${i}" value="${escapeHtml(ev.description || '')}" placeholder="說明（可選）" class="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-ledger" />
+    </div>`).join('');
+  listEl.querySelectorAll('input[data-calai-date]').forEach((el) => { el.addEventListener('input', () => { state.calendarAiEvents[Number(el.dataset.calaiDate)].date = el.value; }); });
+  listEl.querySelectorAll('input[data-calai-title]').forEach((el) => { el.addEventListener('input', () => { state.calendarAiEvents[Number(el.dataset.calaiTitle)].title = el.value; }); });
+  listEl.querySelectorAll('input[data-calai-desc]').forEach((el) => { el.addEventListener('input', () => { state.calendarAiEvents[Number(el.dataset.calaiDesc)].description = el.value; }); });
+  listEl.querySelectorAll('button[data-calai-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const [i, c] = btn.getAttribute('data-calai-cat').split('-');
+      state.calendarAiEvents[Number(i)].category = c;
+      renderCalendarAiList();
+    });
+  });
+}
+
+async function saveCalendarAiEvents() {
+  const events = state.calendarAiEvents || [];
+  if (!events.length) return toast('沒有可新增的事件。', 'error');
+  let created = 0;
+  await busy(async () => {
+    for (const ev of events) {
+      if (!ev.title || !/^\d{4}-\d{2}-\d{2}$/.test(ev.date)) continue;
+      await api('calendarCreate', { title: ev.title, date: ev.date, category: ev.category, description: ev.description || '' });
+      created += 1;
+    }
+    closeModal();
+    toast(`已新增 ${created} 個事件。`, 'success');
+    await renderCalendarView($('#view'));
+  });
 }
 
 /* ============================ 品項編輯 / AI 辨識 ============================ */

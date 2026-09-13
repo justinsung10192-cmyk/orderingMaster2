@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   try {
     await readRawBody(req);
     const now = Date.now();
-    const result = { startNotices: 0, cutoffReminders: 0, overdueReminders: 0, materialized: 0 };
+    const result = { startNotices: 0, cutoffReminders: 0, overdueReminders: 0, calendarReminders: 0, materialized: 0 };
 
     // 1) 訂餐開始（補漏：已開放但未通知）
     const { data: startSessions, error: startErr } = await supabase
@@ -121,6 +121,33 @@ export default async function handler(req, res) {
         }
       }
       await setAppSetting('', 'last_overdue_reminder', new Date(now).toISOString());
+    }
+
+    // 4) 行事曆提醒：考試／作業「前一天上午 8:00 後」（台灣時間）推播一次
+    const taiwanNow = new Date(now + 8 * 60 * 60 * 1000);
+    if (taiwanNow.getUTCHours() >= 8) {
+      const tomorrow = new Date(now + 8 * 60 * 60 * 1000);
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      const tomorrowDate = `${tomorrow.getUTCFullYear()}-${String(tomorrow.getUTCMonth() + 1).padStart(2, '0')}-${String(tomorrow.getUTCDate()).padStart(2, '0')}`;
+      const lastCalendar = await getAppSetting('demo', 'last_calendar_reminder', '');
+      if (lastCalendar !== tomorrowDate) {
+        const { data: events } = await supabase
+          .from('calendar_events')
+          .select('*')
+          .eq('class_id', 'demo')
+          .eq('event_date', tomorrowDate)
+          .in('category', ['考試', '作業']);
+        if ((events || []).length) {
+          const titles = [...new Set((events || []).map((event) => event.title))].slice(0, 5).join('、');
+          await sendPushToClass('demo', {
+            title: '明天有考試／作業',
+            body: `${tomorrowDate.slice(5).replace('-', '/')}：${titles}${(events || []).length > 5 ? ' 等' : ''}`,
+            url: '/',
+          });
+          result.calendarReminders = (events || []).length;
+        }
+        await setAppSetting('demo', 'last_calendar_reminder', tomorrowDate);
+      }
     }
 
     result.materialized = await materializeRecurring('demo');
