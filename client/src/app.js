@@ -33,7 +33,7 @@ const state = {
   scanner: null,
   deferredInstall: null,
   push: { supported: false, subscribed: false },
-  calendar: { month: todayString().slice(0, 7), events: [], logs: [], showLogs: false },
+  calendar: { month: todayString().slice(0, 7), events: [], logs: [], showLogs: false, showPast: false },
   calendarEditingId: null,
   calendarCategory: '其他',
   calendarAiEvents: [],
@@ -1747,7 +1747,7 @@ async function onClick(event) {
     if (nav === 'admin') state.adminTab = 'dashboard';
     render();
     refreshBoot()
-      .then(() => { if (state.view === nav && state.user) render(); })
+      .then(() => { if (state.view === nav && state.user) renderView(); })
       .catch(() => {});
     return;
   }
@@ -1917,6 +1917,7 @@ async function handleAction(action, target) {
     case 'calendar-save': await saveCalendarEvent(); break;
     case 'calendar-ai': openCalendarAi(); break;
     case 'calendar-logs': state.calendar.showLogs = !state.calendar.showLogs; await renderCalendarView($('#view')); break;
+    case 'calendar-toggle-past': state.calendar.showPast = !state.calendar.showPast; renderCalendarContent($('#view')); break;
     case 'save-calendar-ai': await saveCalendarAiEvents(); break;
     case 'del-calendar-ai': { const idx = Number(target.getAttribute('data-index')); state.calendarAiEvents.splice(idx, 1); renderCalendarAiList(); break; }
     // 管理員 - 菜單
@@ -2184,6 +2185,7 @@ function calendarActionLabel(action) {
 }
 
 async function renderCalendarView(root) {
+  const prevScroll = window.scrollY;
   try {
     const data = await api('calendarList', { month: state.calendar.month });
     state.calendar.events = data.events || [];
@@ -2196,6 +2198,7 @@ async function renderCalendarView(root) {
     return;
   }
   renderCalendarContent(root);
+  requestAnimationFrame(() => window.scrollTo(0, prevScroll));
 }
 
 function renderCalendarContent(root) {
@@ -2203,8 +2206,32 @@ function renderCalendarContent(root) {
   const month = state.calendar.month;
   const events = state.calendar.events || [];
   const showLogs = isAdmin && state.calendar.showLogs;
-  const dates = [...new Set(events.map((e) => e.date))].sort();
-  const grouped = dates.map((date) => ({ date, items: events.filter((e) => e.date === date) }));
+  const today = todayString();
+
+  const upcoming = events.filter((e) => e.date >= today);
+  const past = events.filter((e) => e.date < today).sort((a, b) => b.date.localeCompare(a.date));
+  const showPast = state.calendar.showPast;
+
+  const group = (list) => {
+    const dates = [...new Set(list.map((e) => e.date))].sort();
+    return dates.map((date) => ({ date, items: list.filter((e) => e.date === date) }));
+  };
+
+  let body;
+  if (showLogs) {
+    body = renderCalendarLogsHtml();
+  } else if (!events.length) {
+    body = '<p class="rounded-2xl bg-white/60 px-4 py-12 text-center text-sm text-slate-400">這個月尚無事件，點「＋ 新增事件」或「AI 辨識」開始。</p>';
+  } else {
+    body = `
+      ${upcoming.length ? renderCalendarEventsHtml(group(upcoming)) : '<p class="rounded-2xl bg-white/60 px-4 py-8 text-center text-sm text-slate-400">本月沒有未來的活動。</p>'}
+      ${past.length ? `
+      <button data-action="calendar-toggle-past" class="flex w-full items-center justify-between rounded-2xl bg-white/80 px-4 py-3 text-sm font-bold text-slate-500 ring-1 ring-ledger/10">
+        <span>${showPast ? '▾ 隱藏已過期事件' : `▸ 已過期事件（${past.length}）`}</span>
+      </button>
+      ${showPast ? renderCalendarEventsHtml(group(past)) : ''}` : ''}
+    `;
+  }
 
   root.innerHTML = `
     <section class="view-enter space-y-4">
@@ -2220,7 +2247,7 @@ function renderCalendarContent(root) {
         <button data-action="calendar-ai" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">📷 AI 辨識新增</button>
         ${isAdmin ? `<button data-action="calendar-logs" class="rounded-xl bg-white px-3 py-2 text-xs font-bold text-ledger ring-1 ring-ledger/10">${showLogs ? '← 返回行事曆' : '歷史紀錄'}</button>` : ''}
       </div>
-      ${showLogs ? renderCalendarLogsHtml() : renderCalendarEventsHtml(grouped)}
+      ${body}
     </section>`;
   $('#calendar-month')?.addEventListener('change', async (e) => {
     state.calendar.month = e.target.value;
