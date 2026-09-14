@@ -44,15 +44,3 @@ body.is-busy::before { content: ''; position: fixed; left: 50%; top: 50%; width:
 #scroll-drag.hidden { display: none; }
 #scroll-drag-thumb { position: absolute; top: 0; left: 0; width: 8px; height: 48px; border-radius: 9999px; background: rgba(23, 59, 98, .26); cursor: grab; touch-action: none; transition: background .15s; }
 #scroll-drag-thumb:hover, #scroll-drag-thumb:active { background: rgba(23, 59, 98, .55); }
-
-/* 載入動畫（可愛妹子） */
-.loader-girl { animation: lg-float 1.6s ease-in-out infinite; }
-.lg-bob { animation: lg-bob 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-.lg-wave { animation: lg-wave 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
-.loader-dot { width: 8px; height: 8px; border-radius: 9999px; background: #F6A04D; animation: lg-dot 1.2s ease-in-out infinite; }
-.loader-dot:nth-child(2) { animation-delay: .15s; }
-.loader-dot:nth-child(3) { animation-delay: .3s; }
-@keyframes lg-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-@keyframes lg-bob { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(-4deg); } 70% { transform: rotate(4deg); } }
-@keyframes lg-wave { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(16deg); } }
-@keyframes lg-dot { 0%, 100% { opacity: .4; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-4px); } }

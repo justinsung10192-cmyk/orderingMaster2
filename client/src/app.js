@@ -76,50 +76,48 @@ async function busy(fn) {
 }
 
 /* ============================ 啟動流程 ============================ */
+let bootProgressTimer = null;
+
 function renderLoader() {
   app.innerHTML = `
     <div id="boot-loader" class="fixed inset-0 z-[100] grid place-items-center bg-paper">
-      <div class="flex flex-col items-center">
-        <div class="loader-girl">
-          <svg viewBox="0 0 120 140" width="136" height="158" aria-hidden="true">
-            <g class="lg-bob">
-              <ellipse cx="60" cy="21" rx="35" ry="27" fill="#F6A04D"/>
-              <path d="M25 25 Q25 4 60 4 Q95 4 95 25 Q95 42 75 46 L45 46 Q25 42 25 25 Z" fill="#3b2a24"/>
-              <path d="M27 23 Q42 11 58 13 Q46 19 42 33 Z" fill="#5a3a2e"/>
-              <path d="M93 23 Q78 11 62 13 Q74 19 78 33 Z" fill="#5a3a2e"/>
-              <circle cx="46" cy="41" r="3.4" fill="#fff"/>
-              <circle cx="74" cy="41" r="3.4" fill="#fff"/>
-              <circle cx="47" cy="42" r="1.6" fill="#2b2b2b"/>
-              <circle cx="75" cy="42" r="1.6" fill="#2b2b2b"/>
-              <path d="M46 48 Q52 52 58 48" stroke="#2b2b2b" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-              <path d="M62 48 Q68 52 74 48" stroke="#2b2b2b" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-              <path d="M52 58 Q60 62 68 58" stroke="#e07a6a" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-              <ellipse cx="40" cy="51" rx="5" ry="3" fill="#f6b98f" opacity=".7"/>
-              <ellipse cx="80" cy="51" rx="5" ry="3" fill="#f6b98f" opacity=".7"/>
-            </g>
-            <g class="lg-bob">
-              <path d="M34 71 Q60 59 86 71 L82 97 Q60 105 38 97 Z" fill="#173B62"/>
-              <path d="M45 75 L35 117 L51 123 L61 89 Z" fill="#173B62"/>
-              <path d="M75 75 L85 117 L69 123 L59 89 Z" fill="#173B62"/>
-              <path d="M52 71 Q60 67 68 71" stroke="#f6b98f" stroke-width="2" fill="none" stroke-linecap="round"/>
-            </g>
-            <g class="lg-wave">
-              <path d="M45 101 L36 119 L48 127" stroke="#F6A04D" stroke-width="4" fill="none" stroke-linecap="round"/>
-            </g>
-          </svg>
-        </div>
-        <p class="mt-4 font-serif text-lg font-black tracking-wide text-ledger">訂餐通</p>
+      <div class="flex w-full max-w-xs flex-col items-center px-8">
+        <img src="/icons/loading.gif" alt="載入中" class="h-44 w-auto object-contain" />
+        <p class="mt-3 font-serif text-lg font-black tracking-wide text-ledger">訂餐通</p>
         <p class="mt-1 text-xs text-slate-400">正在為你準備午餐手帳…</p>
-        <div class="mt-4 flex gap-1.5">
-          <span class="loader-dot"></span><span class="loader-dot"></span><span class="loader-dot"></span>
+        <div class="mt-5 h-2 w-full overflow-hidden rounded-full bg-mist">
+          <div id="boot-progress" class="h-full w-0 rounded-full bg-gradient-to-r from-apricot to-stamp transition-[width] duration-200 ease-out"></div>
         </div>
+        <p id="boot-percent" class="mt-1.5 text-xs font-bold tabular-nums text-ledger">0%</p>
       </div>
     </div>`;
+}
+
+// 載入進度條：先快後慢推進到 92%，待載入完成畫面切換即消失
+function startBootProgress() {
+  const bar = document.getElementById('boot-progress');
+  const pct = document.getElementById('boot-percent');
+  if (!bar || !pct) return;
+  let value = 0;
+  bootProgressTimer = setInterval(() => {
+    value = Math.min(92, value + Math.max(0.6, (92 - value) * 0.07));
+    bar.style.width = `${value}%`;
+    pct.textContent = `${Math.round(value)}%`;
+  }, 120);
+}
+
+function finishBootProgress() {
+  if (bootProgressTimer) { clearInterval(bootProgressTimer); bootProgressTimer = null; }
+  const bar = document.getElementById('boot-progress');
+  const pct = document.getElementById('boot-percent');
+  if (bar) bar.style.width = '100%';
+  if (pct) pct.textContent = '100%';
 }
 
 async function bootstrap() {
   renderLoader();
   initScrollbar();
+  startBootProgress();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
@@ -130,6 +128,7 @@ async function bootstrap() {
     try {
       state.boot = await api('getBootstrap');
       state.user = state.boot.user;
+      finishBootProgress();
       render();
       return;
     } catch (_) {
@@ -138,6 +137,7 @@ async function bootstrap() {
     }
   }
   state.user = null;
+  finishBootProgress();
   render();
 }
 
