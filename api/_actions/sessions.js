@@ -9,7 +9,7 @@ function formatTime(iso) {
 }
 
 export const actions = {
-  // 建立或更新單一場次（草稿狀態，需「公布」後學生才能看到）
+  // 建立或更新單一場次（草稿狀態，需「公布」後學生才能看到；支援請客場次）
   async adminSaveSession(data, ctx) {
     const store = await findOne('stores', { id: Number(data.storeId) }, ctx.classId);
     if (!store) throw appError('NOT_FOUND', '店家不存在。');
@@ -18,12 +18,21 @@ export const actions = {
     const cutoff = new Date(data.cutoffTime);
     if (!Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
 
+    const isTreat = data.isTreat === true;
+    let treatCap = 0;
+    if (isTreat) {
+      treatCap = Number(data.treatCap);
+      if (!Number.isFinite(treatCap) || treatCap <= 0 || treatCap > 100000) throw appError('INVALID_INPUT', '請輸入正確的請客金額上限。');
+    }
+
     const weekLabel = weekLabelOf(`${orderDate}T00:00:00`);
     const values = {
       store_id: store.id,
       order_date: orderDate,
       cutoff_time: cutoff.toISOString(),
       week_label: weekLabel,
+      is_treat: isTreat,
+      treat_cap: isTreat ? treatCap : 0,
     };
 
     if (data.sessionId) {
@@ -153,6 +162,9 @@ export const actions = {
           monthDay: monthDay(session.order_date),
           cutoffTime: session.cutoff_time,
           isOpen: Boolean(session.is_open),
+          isTreat: Boolean(session.is_treat),
+          treatCap: num(session.treat_cap),
+          treatUsed: num(session.treat_used),
         })),
     };
   },

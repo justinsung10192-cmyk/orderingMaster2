@@ -30,7 +30,7 @@ button:active { transform: scale(.97); }
 .pin-box { letter-spacing: .4em; font-variant-numeric: tabular-nums; }
 body.is-busy { cursor: wait; }
 body.is-busy button, body.is-busy [data-action] { pointer-events: none !important; }
-body.is-busy::after { content: ''; position: fixed; inset: 0; background: rgba(248,245,238,.45); z-index: 9990; }
+body.is-busy::after { content: ''; position: fixed; inset: 0; background: rgba(23,59,98,.22); z-index: 9990; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin .7s linear infinite; display: inline-block; }

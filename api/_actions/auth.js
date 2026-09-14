@@ -117,28 +117,6 @@ export const actions = {
     const holidays = await listRows('holidays', { classId });
     const announcement = await getAppSetting(classId, 'announcement', '');
 
-    // 進行中的請客（供下單時選擇）
-    const treatRows = await listRows('treats', { classId, filters: { is_active: true }, order: 'created_at', orderAscending: false });
-    const treatHostIds = [...new Set(treatRows.map((t) => t.host_user_id).filter(Boolean))];
-    const treatHosts = treatHostIds.length ? await listRowsIn('users', 'id', treatHostIds, { classId }) : [];
-    const treatHostById = new Map(treatHosts.map((u) => [String(u.id), u]));
-    const treats = treatRows.map((t) => {
-      const host = treatHostById.get(String(t.host_user_id));
-      return {
-        treatId: sid(t.id),
-        title: t.title,
-        hostName: host?.student_name || '已刪除帳號',
-        hostSeat: host?.seat_no || host?.student_no || '',
-        capAmount: num(t.cap_amount),
-        usedAmount: num(t.used_amount),
-        remaining: Math.max(0, Number(t.cap_amount) - Number(t.used_amount)),
-      };
-    });
-
-    // 自訂欠費
-    const debtRows = await listRows('custom_debts', { classId, filters: { user_id: user.id } });
-    const customDebt = debtRows.reduce((sum, row) => sum + num(row.amount), 0);
-
     return {
       user: publicUser(user),
       isAdmin: user.role === 'Admin',
@@ -152,8 +130,6 @@ export const actions = {
       myVotes: myVotes.map((vote) => String(vote.store_id)),
       voteTally: tally,
       holidays: holidays.map((holiday) => holiday.holiday_date),
-      treats,
-      customDebt,
     };
   },
 

@@ -24,8 +24,6 @@ export const actions = {
     const allOrders = await listRows('orders', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
     const activeOrders = allOrders.filter((order) => !order.is_deleted);
     const cashUnpaid = round2(activeOrders.reduce((sum, order) => sum + outstandingOf(order), 0));
-    const debtRows = await listRows('custom_debts', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
-    const customDebt = round2(debtRows.reduce((sum, row) => sum + num(row.amount), 0));
     const freshUser = await findOne('users', { id: ctx.user.id });
 
     const sessionIds = [...new Set(activeOrders.map((order) => order.session_id))];
@@ -41,7 +39,6 @@ export const actions = {
     return {
       user: publicUser(freshUser),
       cashUnpaid,
-      customDebt,
       transactions: transactions.map((transaction) => ({
         type: KIND_LABEL[transaction.kind] || transaction.kind,
         amount: num(transaction.amount),

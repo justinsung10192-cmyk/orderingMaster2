@@ -60,13 +60,11 @@ async function loadAdminOrderContext(classId, sessionId, seatNo) {
   return { session, user, menuItems };
 }
 
-// 計算請客折抵：免費額度 = min(訂單總額, 該請客剩餘預算)
-async function computeTreat(classId, treatId, total) {
-  if (!treatId) return { treatId: null, treatCovered: 0 };
-  const treat = await findOne('treats', { id: Number(treatId) }, classId);
-  if (!treat || !treat.is_active) return { treatId: null, treatCovered: 0 };
-  const remaining = Math.max(0, num(treat.cap_amount) - num(treat.used_amount));
-  return { treatId: treat.id, treatCovered: round2(Math.min(total, remaining)) };
+// 計算請客折抵：請客場次下，免費額度 = min(訂單總額, 場次剩餘額度)
+function computeTreatFromSession(session, total) {
+  if (!session || !session.is_treat) return 0;
+  const remaining = Math.max(0, num(session.treat_cap) - num(session.treat_used));
+  return round2(Math.min(total, remaining));
 }
 
 export const actions = {
@@ -78,7 +76,7 @@ export const actions = {
     const pureMode = await isPureBalanceMode(ctx.classId);
     const freshUser = await findOne('users', { id: ctx.user.id }, ctx.classId);
     const balance = num(freshUser.wallet_balance);
-    const { treatId, treatCovered } = await computeTreat(ctx.classId, data.treatId, computed.total);
+    const treatCovered = computeTreatFromSession(session, computed.total);
     const netTotal = round2(Math.max(0, computed.total - treatCovered));
 
     let walletPaid = 0;
@@ -105,7 +103,6 @@ export const actions = {
       p_pure_mode: pureMode,
       p_items: JSON.stringify(computed.items),
       p_note: note,
-      p_treat_id: treatId,
       p_treat_covered: treatCovered,
     });
     return { ok: true, orderId: sid(result.order_id), walletBalance: num(result.wallet_balance), paymentStatus: result.payment_status };
@@ -124,7 +121,7 @@ export const actions = {
     const balance = num(freshUser.wallet_balance);
     // 已用儲值金支付的部分不得退回現金（避免把錢包餘額轉成現金欠款）
     const walletPaidSoFar = round2(num(existing.wallet_paid));
-    const { treatId, treatCovered } = await computeTreat(ctx.classId, data.treatId, computed.total);
+    const treatCovered = computeTreatFromSession(session, computed.total);
     const netTotal = round2(Math.max(0, computed.total - treatCovered));
 
     let walletPaid = 0;
@@ -148,7 +145,6 @@ export const actions = {
       p_order_id: existing.id,
       p_items: JSON.stringify(computed.items),
       p_note: note,
-      p_treat_id: treatId,
       p_treat_covered: treatCovered,
     });
     return { ok: true, orderId: sid(result.order_id), walletBalance: num(result.wallet_balance), paymentStatus: result.payment_status };
