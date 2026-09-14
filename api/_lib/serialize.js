@@ -59,6 +59,8 @@ export function publicOrder(order) {
     })),
     totalPrice: num(order.total_price),
     priorPaid: num(order.prior_paid),
+    treatId: order.treat_id ? sid(order.treat_id) : null,
+    treatCovered: num(order.treat_covered),
     paymentStatus: order.payment_status,
     pickupStatus: order.pickup_status,
     note: order.note || '',
@@ -131,6 +133,7 @@ export async function loadSessionWithMenu(session) {
       itemId: sid(item.id),
       name: item.name,
       dish: item.dish || '',
+      vegetarian: Boolean(item.is_vegetarian),
       price: num(item.price),
       options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({
         index,
@@ -204,6 +207,7 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
         itemId: sid(item.id),
         name: item.name,
         dish: item.dish || '',
+        vegetarian: Boolean(item.is_vegetarian),
         price: num(item.price),
         options: (Array.isArray(item.options) ? item.options : []).map((option, index) => ({ index, name: option.name, price: num(option.price), required: Boolean(option.required), group: String(option.group || '') })),
       }));

@@ -8,6 +8,8 @@ import { materializeRecurring } from './_actions/sessions.js';
 
 export const config = { api: { bodyParser: false } };
 
+export const maxDuration = 60;
+
 function fmtTime(iso) {
   // 通知內顯示「台灣時間」（伺服器可能跑在 UTC）
   const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000);

@@ -17,6 +17,7 @@ async function loadOrderContext(data, ctx) {
     itemId: sid(item.id),
     name: item.name,
     dish: item.dish || '',
+    vegetarian: Boolean(item.is_vegetarian),
     price: num(item.price),
     options: Array.isArray(item.options) ? item.options : [],
   }));
@@ -52,10 +53,20 @@ async function loadAdminOrderContext(classId, sessionId, seatNo) {
       itemId: sid(item.id),
       name: item.name,
       dish: item.dish || '',
+      vegetarian: Boolean(item.is_vegetarian),
       price: num(item.price),
       options: Array.isArray(item.options) ? item.options : [],
     }));
   return { session, user, menuItems };
+}
+
+// 計算請客折抵：免費額度 = min(訂單總額, 該請客剩餘預算)
+async function computeTreat(classId, treatId, total) {
+  if (!treatId) return { treatId: null, treatCovered: 0 };
+  const treat = await findOne('treats', { id: Number(treatId) }, classId);
+  if (!treat || !treat.is_active) return { treatId: null, treatCovered: 0 };
+  const remaining = Math.max(0, num(treat.cap_amount) - num(treat.used_amount));
+  return { treatId: treat.id, treatCovered: round2(Math.min(total, remaining)) };
 }
 
 export const actions = {
@@ -67,16 +78,18 @@ export const actions = {
     const pureMode = await isPureBalanceMode(ctx.classId);
     const freshUser = await findOne('users', { id: ctx.user.id }, ctx.classId);
     const balance = num(freshUser.wallet_balance);
+    const { treatId, treatCovered } = await computeTreat(ctx.classId, data.treatId, computed.total);
+    const netTotal = round2(Math.max(0, computed.total - treatCovered));
 
     let walletPaid = 0;
     let cashOutstanding = 0;
     if (pureMode) {
-      walletPaid = computed.total;
+      walletPaid = netTotal;
     } else if (data.useWallet !== false) {
-      walletPaid = round2(Math.min(balance, computed.total));
-      cashOutstanding = round2(computed.total - walletPaid);
+      walletPaid = round2(Math.min(balance, netTotal));
+      cashOutstanding = round2(netTotal - walletPaid);
     } else {
-      cashOutstanding = computed.total;
+      cashOutstanding = netTotal;
     }
 
     const existing = await findOne('orders', { session_id: session.id, user_id: ctx.user.id }, ctx.classId);
@@ -92,6 +105,8 @@ export const actions = {
       p_pure_mode: pureMode,
       p_items: JSON.stringify(computed.items),
       p_note: note,
+      p_treat_id: treatId,
+      p_treat_covered: treatCovered,
     });
     return { ok: true, orderId: sid(result.order_id), walletBalance: num(result.wallet_balance), paymentStatus: result.payment_status };
   },
@@ -109,15 +124,17 @@ export const actions = {
     const balance = num(freshUser.wallet_balance);
     // 已用儲值金支付的部分不得退回現金（避免把錢包餘額轉成現金欠款）
     const walletPaidSoFar = round2(num(existing.wallet_paid));
+    const { treatId, treatCovered } = await computeTreat(ctx.classId, data.treatId, computed.total);
+    const netTotal = round2(Math.max(0, computed.total - treatCovered));
 
     let walletPaid = 0;
     let cashOutstanding = 0;
     if (pureMode) {
-      walletPaid = computed.total;
+      walletPaid = netTotal;
     } else {
-      walletPaid = data.useWallet !== false ? round2(Math.min(balance, computed.total)) : 0;
-      if (walletPaidSoFar > 0) walletPaid = round2(Math.max(walletPaid, Math.min(walletPaidSoFar, computed.total)));
-      cashOutstanding = round2(computed.total - walletPaid);
+      walletPaid = data.useWallet !== false ? round2(Math.min(balance, netTotal)) : 0;
+      if (walletPaidSoFar > 0) walletPaid = round2(Math.max(walletPaid, Math.min(walletPaidSoFar, netTotal)));
+      cashOutstanding = round2(netTotal - walletPaid);
     }
 
     const result = await callRpc('fn_settle_order', {
@@ -131,6 +148,8 @@ export const actions = {
       p_order_id: existing.id,
       p_items: JSON.stringify(computed.items),
       p_note: note,
+      p_treat_id: treatId,
+      p_treat_covered: treatCovered,
     });
     return { ok: true, orderId: sid(result.order_id), walletBalance: num(result.wallet_balance), paymentStatus: result.payment_status };
   },

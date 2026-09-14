@@ -36,6 +36,7 @@ export const actions = {
           itemId: sid(item.id),
           name: item.name,
           dish: item.dish || '',
+          vegetarian: Boolean(item.is_vegetarian),
           price: num(item.price),
           menuDate: item.menu_date || '',
           options: (Array.isArray(item.options) ? item.options : []).map((option) => ({
@@ -83,17 +84,18 @@ export const actions = {
     if (!name) throw appError('INVALID_INPUT', '請輸入品項名稱。');
     if (price < 0 || price > 100000) throw appError('INVALID_INPUT', '價格不正確。');
     const options = normalizeOptions(data.options);
+    const isVegetarian = Boolean(data.isVegetarian);
 
     if (data.itemId) {
       const existing = await findOne('menu_items', { id: Number(data.itemId) }, ctx.classId);
       if (!existing) throw appError('NOT_FOUND', '品項不存在。');
-      await updateRows('menu_items', { id: existing.id }, { name, price, options });
+      await updateRows('menu_items', { id: existing.id }, { name, price, options, is_vegetarian: isVegetarian });
       return { ok: true, itemId: sid(existing.id) };
     }
     // 同名品項以 upsert 更新（避免 unique constraint 錯誤）
     const { data: item, error } = await supabase
       .from('menu_items')
-      .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options, menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' })
+      .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options, is_vegetarian: isVegetarian, menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' })
       .select()
       .single();
     if (error) throw appError('DB_ERROR', error.message);
@@ -129,7 +131,7 @@ export const actions = {
       const price = num(item?.price);
       const { error } = await supabase
         .from('menu_items')
-        .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options: normalizeOptions(item.options), menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' });
+        .upsert({ class_id: ctx.classId, store_id: store.id, name, price, options: normalizeOptions(item.options), is_vegetarian: Boolean(item.isVegetarian), menu_date: '1970-01-01', sort_order: 0 }, { onConflict: 'class_id,store_id,name,menu_date' });
       if (error) throw appError('DB_ERROR', error.message);
       count += 1;
     }

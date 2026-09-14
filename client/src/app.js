@@ -38,11 +38,14 @@ const state = {
   calendarCategory: '其他',
   calendarAiEvents: [],
   busy: false,
+  treats: [],
+  changelog: [],
+  showChangelog: false,
 };
 
 const ICONS = { order: '⌑', vote: '♡', calendar: '▦', wallet: '¤', admin: '✓', settings: '☷' };
 
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.1.0'; // 由 vite.config.ts 於建置時注入
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0'; // 由 vite.config.ts 於建置時注入
 
 /* ============================ API ============================ */
 async function api(action, data = {}) {
@@ -73,7 +76,50 @@ async function busy(fn) {
 }
 
 /* ============================ 啟動流程 ============================ */
+function renderLoader() {
+  app.innerHTML = `
+    <div id="boot-loader" class="fixed inset-0 z-[100] grid place-items-center bg-paper">
+      <div class="flex flex-col items-center">
+        <div class="loader-girl">
+          <svg viewBox="0 0 120 140" width="136" height="158" aria-hidden="true">
+            <g class="lg-bob">
+              <ellipse cx="60" cy="21" rx="35" ry="27" fill="#F6A04D"/>
+              <path d="M25 25 Q25 4 60 4 Q95 4 95 25 Q95 42 75 46 L45 46 Q25 42 25 25 Z" fill="#3b2a24"/>
+              <path d="M27 23 Q42 11 58 13 Q46 19 42 33 Z" fill="#5a3a2e"/>
+              <path d="M93 23 Q78 11 62 13 Q74 19 78 33 Z" fill="#5a3a2e"/>
+              <circle cx="46" cy="41" r="3.4" fill="#fff"/>
+              <circle cx="74" cy="41" r="3.4" fill="#fff"/>
+              <circle cx="47" cy="42" r="1.6" fill="#2b2b2b"/>
+              <circle cx="75" cy="42" r="1.6" fill="#2b2b2b"/>
+              <path d="M46 48 Q52 52 58 48" stroke="#2b2b2b" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+              <path d="M62 48 Q68 52 74 48" stroke="#2b2b2b" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+              <path d="M52 58 Q60 62 68 58" stroke="#e07a6a" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+              <ellipse cx="40" cy="51" rx="5" ry="3" fill="#f6b98f" opacity=".7"/>
+              <ellipse cx="80" cy="51" rx="5" ry="3" fill="#f6b98f" opacity=".7"/>
+            </g>
+            <g class="lg-bob">
+              <path d="M34 71 Q60 59 86 71 L82 97 Q60 105 38 97 Z" fill="#173B62"/>
+              <path d="M45 75 L35 117 L51 123 L61 89 Z" fill="#173B62"/>
+              <path d="M75 75 L85 117 L69 123 L59 89 Z" fill="#173B62"/>
+              <path d="M52 71 Q60 67 68 71" stroke="#f6b98f" stroke-width="2" fill="none" stroke-linecap="round"/>
+            </g>
+            <g class="lg-wave">
+              <path d="M45 101 L36 119 L48 127" stroke="#F6A04D" stroke-width="4" fill="none" stroke-linecap="round"/>
+            </g>
+          </svg>
+        </div>
+        <p class="mt-4 font-serif text-lg font-black tracking-wide text-ledger">訂餐通</p>
+        <p class="mt-1 text-xs text-slate-400">正在為你準備午餐手帳…</p>
+        <div class="mt-4 flex gap-1.5">
+          <span class="loader-dot"></span><span class="loader-dot"></span><span class="loader-dot"></span>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function bootstrap() {
+  renderLoader();
+  initScrollbar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
@@ -228,17 +274,21 @@ async function onSetup(event) {
 function render() {
   if (!state.user) return renderAuth();
   if (state.user.mustChangePassword) return renderSetup();
+  if (state.user.role === 'Teacher' && ['order', 'vote', 'wallet', 'admin'].includes(state.view)) state.view = 'calendar';
 
+  const isTeacher = state.user.role === 'Teacher';
   const navItems = [
-    { id: 'order', label: '訂餐', icon: ICONS.order },
-    { id: 'vote', label: '投票', icon: ICONS.vote },
+    ...(isTeacher ? [] : [
+      { id: 'order', label: '訂餐', icon: ICONS.order },
+      { id: 'vote', label: '投票', icon: ICONS.vote },
+      { id: 'wallet', label: '個人', icon: ICONS.wallet },
+    ]),
     { id: 'calendar', label: '行事曆', icon: ICONS.calendar },
-    { id: 'wallet', label: '個人', icon: ICONS.wallet },
     ...(state.user.role === 'Admin' ? [{ id: 'admin', label: '管理', icon: ICONS.admin }] : []),
     { id: 'settings', label: '設定', icon: ICONS.settings },
   ];
 
-  const headerWallet = state.user.role === 'Admin' ? '' :
+  const headerWallet = (state.user.role === 'Admin' || isTeacher) ? '' :
     `<span id="header-wallet" class="pr-1 text-xs font-bold tabular-nums text-stamp">${fmtMoney(state.user.walletBalance)}</span>`;
 
   app.innerHTML = `
@@ -247,7 +297,7 @@ function render() {
         <div class="mx-auto flex max-w-3xl items-center justify-between">
           <button data-nav="order" class="flex items-center gap-2 text-left">
             <span class="grid h-11 w-11 place-items-center rounded-xl bg-ledger font-serif text-xl text-white">⌑</span>
-            <div><p class="font-serif text-base font-black leading-5">訂餐通</p><p id="header-subtitle" class="text-[11px] text-slate-500">${state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳'}</p></div>
+            <div><p class="font-serif text-base font-black leading-5">訂餐通</p><p id="header-subtitle" class="text-[11px] text-slate-500">${headerSubtitle()}</p></div>
           </button>
           <div class="flex items-center gap-2">
             <button data-action="manual-refresh" class="grid h-9 w-9 place-items-center rounded-full bg-white text-lg font-black text-ledger shadow-sm ring-1 ring-ledger/5" title="重新整理"><span id="refresh-icon" class="inline-block">↻</span></button>
@@ -420,6 +470,7 @@ function openOrderSheet(session) {
     selections,
     note: existing?.note || '',
     useWallet: existing ? existing.priorPaid > 0 : true,
+    treatId: existing?.treatId || '',
     expandedOptions: new Set(),
   };
   renderOrderSheet();
@@ -445,7 +496,10 @@ function renderOrderSheet() {
   const { total, count } = draftTotal();
   const balance = Number(session.walletBalance || 0);
   const isAdmin = Boolean(draft.adminFor);
-  const insufficient = session.pureBalanceMode && total > balance;
+  const treat = draft.treatId ? (state.boot?.treats || []).find((t) => t.treatId === draft.treatId) : null;
+  const covered = treat ? Math.min(total, Math.max(0, Number(treat.remaining || 0))) : 0;
+  const netTotal = Math.max(0, total - covered);
+  const insufficient = session.pureBalanceMode && netTotal > balance;
   const cutoffPassed = !isAdmin && cutoffRemaining(session.cutoffTime).passed;
   const prevScroll = document.getElementById('sheet-scroll')?.scrollTop || 0;
 
@@ -487,9 +541,21 @@ function renderOrderSheet() {
               </label>
             `}
             ${isAdmin ? `<p class="mb-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">管理員補單：為 ${escapeHtml(draft.adminFor.seatNo)} ${escapeHtml(draft.adminFor.name)} 修改／新增訂單（截止後亦可）。</p>` : ''}
+            ${!isAdmin && (state.boot?.treats || []).length ? `
+              <div class="mb-3">
+                <label class="mb-1 block text-xs font-bold text-slate-500">請客折抵（選用）</label>
+                <select id="order-treat" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger">
+                  <option value="">不使用請客</option>
+                  ${state.boot.treats.map((t) => `<option value="${t.treatId}" ${draft.treatId === t.treatId ? 'selected' : ''}>${escapeHtml(t.title)} · ${escapeHtml(t.hostName)}（上限 ${fmtMoney(t.capAmount)}，剩 ${fmtMoney(t.remaining)}）</option>`).join('')}
+                </select>
+              </div>` : ''}
                         <input id="order-note" maxlength="120" value="${escapeHtml(draft.note)}" placeholder="備註（可選）" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
             <div class="flex items-center justify-between">
-              <div><p class="text-xs text-slate-500">共 ${count} 份</p><p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p></div>
+              <div>
+                <p class="text-xs text-slate-500">共 ${count} 份${covered > 0 ? ` · 請客折抵 ${fmtMoney(covered)}` : ''}</p>
+                <p class="font-serif text-2xl font-black tabular-nums">${fmtMoney(total)}</p>
+                ${covered > 0 ? `<p class="text-[11px] font-bold text-stamp">實付 ${fmtMoney(netTotal)}</p>` : ''}
+              </div>
               <button id="submit-order" class="rounded-xl ${insufficient ? 'bg-slate-300' : 'bg-ledger'} px-8 py-3.5 text-sm font-bold text-white">${isAdmin ? (session.existingOrder ? '更新補單' : '送出補單') : (session.existingOrder ? '更新訂單' : '送出訂單')}</button>
             </div>
             ${session.existingOrder && !isAdmin ? '<button id="delete-order" class="mt-2 w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-600">刪除此訂單</button>' : ''}
@@ -503,6 +569,7 @@ function renderOrderSheet() {
 
   $('#use-wallet')?.addEventListener('change', (event) => { state.orderDraft.useWallet = event.target.checked; });
   $('#order-note')?.addEventListener('input', (event) => { state.orderDraft.note = event.target.value; });
+  $('#order-treat')?.addEventListener('change', (event) => { state.orderDraft.treatId = event.target.value; });
   $('#submit-order')?.addEventListener('click', () => { if (!insufficient) submitOrder(); });
   $('#delete-order')?.addEventListener('click', () => openConfirm('刪除訂單', '刪除後已扣儲值金將自動退回。', deleteCurrentOrder));
 }
@@ -542,7 +609,7 @@ function renderMenuItem(item) {
     <div class="mb-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-ledger/5">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <p class="font-bold text-ledger">${escapeHtml(item.name)}${item.dish ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-600">${escapeHtml(item.dish)}</span>` : ''}</p>
+          <p class="font-bold text-ledger">${escapeHtml(item.name)}${item.vegetarian ? ' <span class="veg-badge">🌱 素</span>' : ''}${item.dish ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold text-amber-600">${escapeHtml(item.dish)}</span>` : ''}</p>
           <p class="mt-0.5 text-sm font-bold tabular-nums text-stamp">${fmtMoney(Number(item.price) + optionTotal)}</p>
         </div>
         <div class="flex items-center gap-2">
@@ -584,6 +651,7 @@ async function submitOrder() {
     await busy(async () => {
       const action = draft.adminFor ? 'adminEditOrder' : (draft.session.existingOrder ? 'updateOrder' : 'placeOrder');
       const payload = { sessionId: draft.session.sessionId, selections, note: draft.note, useWallet: draft.useWallet };
+      if (draft.treatId) payload.treatId = draft.treatId;
       if (draft.adminFor) payload.seatNo = draft.adminFor.seatNo;
       await api(action, payload);
       if (draft.adminFor) await refreshAdmin(); else await refreshBoot();
@@ -682,6 +750,14 @@ function renderVoteView(root) {
             </button>`;
         }).join('')}
       </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <p class="font-bold text-ledger">🍜 推薦店家</p>
+        <p class="mt-0.5 text-xs text-slate-500">想吃某家店？推薦給全班，供管理者參考。</p>
+        <input id="reco-store" maxlength="60" placeholder="店家名稱（例如：麥當勞）" class="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+        <input id="reco-note" maxlength="200" placeholder="備註（可選）" class="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" />
+        <button data-action="submit-recommendation" class="mt-2 w-full rounded-xl bg-apricot py-2.5 text-sm font-bold text-white">送出推薦</button>
+      </div>
     </section>`;
 }
 
@@ -720,9 +796,18 @@ function renderWalletView(root) {
           <span class="text-sm text-emerald-50">現金欠費（待繳）</span>
           <span id="wallet-debt" class="font-bold tabular-nums text-red-100">--</span>
         </div>
+        <div class="mt-2 flex items-center justify-between rounded-xl bg-white/15 px-3 py-2.5">
+          <span class="text-sm text-emerald-50">自訂欠費</span>
+          <span id="wallet-custom-debt" class="font-bold tabular-nums text-red-100">${fmtMoney(state.boot?.customDebt || 0)}</span>
+        </div>
         <div class="mt-4 grid grid-cols-2 gap-2">
           <button data-action="show-qr-pay" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">💰 繳費 QR</button>
           <button data-action="show-qr-pickup" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🍱 取餐 QR</button>
+        </div>
+        <div class="mt-2 grid grid-cols-3 gap-2">
+          <button data-action="open-leave" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🏠 請假</button>
+          <button data-action="open-treat" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🎁 請客</button>
+          <button data-action="open-debt" class="rounded-xl bg-white/20 py-3 text-sm font-bold text-white">🧾 欠費</button>
         </div>
       </div>
 
@@ -753,6 +838,8 @@ async function loadWalletDetail() {
     if (!balanceEl || !ordersEl || !txsEl) return; // 畫面已切換，忽略本次結果
     balanceEl.textContent = fmtMoney(data.walletBalance);
     if (debtEl) debtEl.textContent = data.cashUnpaid > 0 ? fmtMoney(data.cashUnpaid) : '無';
+    const customEl = $('#wallet-custom-debt');
+    if (customEl) customEl.textContent = data.customDebt > 0 ? fmtMoney(data.customDebt) : '無';
     ordersEl.innerHTML = data.orders.length ? data.orders.map((order) => `
       <div class="rounded-xl bg-white p-3.5 shadow-sm ring-1 ring-ledger/5">
         <div class="flex items-center justify-between">
@@ -816,6 +903,9 @@ function renderAdminView(root) {
     { id: 'verify', label: '核銷' },
     { id: 'users', label: '帳號' },
     { id: 'activity', label: '歷程' },
+    { id: 'leave', label: '請假' },
+    { id: 'reco', label: '推薦' },
+    { id: 'treat', label: '請客' },
     { id: 'settings', label: '設定' },
   ];
   root.innerHTML = `
@@ -846,6 +936,9 @@ function renderAdminTab() {
     verify: renderAdminVerify,
     users: renderAdminUsers,
     activity: renderAdminActivity,
+    leave: renderAdminLeave,
+    reco: renderAdminReco,
+    treat: renderAdminTreat,
     settings: renderAdminSettings,
   };
   const fn = handlers[state.adminTab];
@@ -959,6 +1052,7 @@ async function renderAdminDashboard(content) {
                     <span class="text-[10px] font-bold ${paymentColor(order.paymentStatus)}">${paymentLabel(order.paymentStatus)}</span>
                   </div>
                   ${order.outstandingAmount > 0 ? `<button data-action="settle-order" data-order="${order.orderId}" data-user="${order.userId}" class="rounded-lg bg-stamp px-2.5 py-1.5 text-[11px] font-bold text-white">結帳</button>` : ''}
+                  ${order.outstandingAmount > 0 ? `<button data-action="partial-pay" data-order="${order.orderId}" data-user="${order.userId}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">部分繳</button>` : ''}
                   <button data-action="cancel-order" data-order="${order.orderId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">取消</button>
                 </div>
               </div>`).join('')}
@@ -1033,7 +1127,7 @@ function renderStoreFolder(store) {
           ${store.items.map((item) => `
             <div class="flex items-center justify-between rounded-xl px-2 py-2.5">
               <div class="min-w-0">
-                <p class="text-sm font-bold text-ledger">${escapeHtml(item.name)}${item.menuDate && item.menuDate !== '1970-01-01' ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">${monthDay(item.menuDate)}</span>` : ''}</p>
+                <p class="text-sm font-bold text-ledger">${escapeHtml(item.name)}${item.vegetarian ? ' <span class="veg-badge">🌱</span>' : ''}${item.menuDate && item.menuDate !== '1970-01-01' ? ` <span class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">${monthDay(item.menuDate)}</span>` : ''}</p>
                 <p class="text-xs text-slate-400">$${money(item.price)}${item.options.length ? ' · ' + escapeHtml(item.options.map((o) => o.name + (Number(o.price) ? `(+${money(o.price)})` : '') + (o.required ? '＊' : '')).join('、')) : ''}</p>
               </div>
               <div class="flex gap-1.5">
@@ -1285,15 +1379,17 @@ async function renderAdminUsers(content) {
               <div class="flex items-center gap-3">
                 <span class="grid h-9 w-9 place-items-center rounded-full ${user.role === 'Admin' ? 'bg-apricot/20 text-apricot' : 'bg-mist text-ledger'} text-sm font-black">${escapeHtml(user.seatNo || user.studentNo)}</span>
                 <div>
-                  <p class="text-sm font-bold text-ledger">${escapeHtml(user.name)} ${user.role === 'Admin' ? '<span class="rounded bg-apricot/15 px-1.5 py-0.5 text-[10px] font-bold text-apricot">管理</span>' : ''}</p>
+                  <p class="text-sm font-bold text-ledger">${escapeHtml(user.name)} ${user.role === 'Admin' ? '<span class="rounded bg-apricot/15 px-1.5 py-0.5 text-[10px] font-bold text-apricot">管理</span>' : user.role === 'Teacher' ? '<span class="rounded bg-stamp/10 px-1.5 py-0.5 text-[10px] font-bold text-stamp">師長</span>' : ''}</p>
                   <p class="text-xs ${user.isDisabled ? 'text-red-400' : 'text-slate-400'}">座號 ${escapeHtml(user.studentNo)} · ${fmtMoney(user.walletBalance)} ${user.isDisabled ? '· 已停用' : ''}</p>
                 </div>
               </div>
               <div class="flex gap-1.5">
                 ${user.role === 'Admin' ? `<button data-action="demote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-ledger">移除管理</button>` : `<button data-action="promote" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">設為管理</button>`}
+                ${user.role !== 'Admin' ? (user.role === 'Teacher' ? `<button data-action="set-role-student" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">設為學生</button>` : `<button data-action="set-role-teacher" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">設為師長</button>`) : ''}
                 <button data-action="toggle-user" data-user="${user.id}" data-disabled="${user.isDisabled}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.isDisabled ? 'text-stamp' : 'text-slate-500'}">${user.isDisabled ? '啟用' : '停用'}</button>
                 <button data-action="toggle-duty" data-user="${user.id}" data-duty="${user.dutyExempt}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.dutyExempt ? 'text-stamp' : 'text-slate-500'}">${user.dutyExempt ? '恢復值日' : '免值日'}</button>
                 <button data-action="topup" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">儲值</button>
+                <button data-action="user-debt" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">欠費</button>
                 <button data-action="reset-pw" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">重設密碼</button>
                 <button data-action="del-user" data-user="${user.id}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">刪除</button>
               </div>
@@ -1303,6 +1399,408 @@ async function renderAdminUsers(content) {
   } catch (error) {
     content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
   }
+}
+
+/* ----- 請假 ----- */
+async function renderAdminLeave(content) {
+  try {
+    const data = await api('adminListLeave');
+    const pending = data.requests.filter((r) => r.status === 'Pending');
+    const resolved = data.requests.filter((r) => r.status !== 'Pending');
+    const statusBadge = (s) => s === 'Approved' ? '<span class="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600">已批准</span>' : s === 'Rejected' ? '<span class="rounded bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-500">未批准</span>' : '<span class="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600">待審核</span>';
+    const row = (r) => `
+      <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-3 last:border-b-0">
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-ledger">${escapeHtml(r.seatNo)} ${escapeHtml(r.studentName)} <span class="text-xs font-normal text-slate-400">請假 ${escapeHtml(r.leaveDate)}</span></p>
+          ${r.reason ? `<p class="text-xs text-slate-500">${escapeHtml(r.reason)}</p>` : ''}
+          <p class="mt-0.5 text-[10px] text-slate-400">${activityTime(r.requestedAt)}</p>
+        </div>
+        <div class="ml-3 flex shrink-0 items-center gap-1.5">
+          ${r.status === 'Pending' ? `<button data-action="approve-leave" data-id="${r.id}" class="rounded-lg bg-stamp px-2.5 py-1.5 text-[11px] font-bold text-white">批准</button><button data-action="reject-leave" data-id="${r.id}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">駁回</button>` : statusBadge(r.status)}
+        </div>
+      </div>`;
+    content.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">LEAVE</p><h2 class="font-serif text-xl font-black">請假申請</h2></div>
+          <button data-action="refresh-admin" class="rounded-xl bg-mist px-3 py-2 text-xs font-bold text-ledger">重新整理</button>
+        </div>
+        <div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+          <p class="border-b border-ledger/5 px-4 py-3 text-sm font-bold text-amber-600">待審核（${pending.length}）</p>
+          ${pending.length ? pending.map(row).join('') : '<p class="px-4 py-6 text-center text-sm text-slate-400">目前沒有待審核的請假。</p>'}
+        </div>
+        ${resolved.length ? `<div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+          <p class="border-b border-ledger/5 px-4 py-3 text-sm font-bold text-slate-500">已處理</p>
+          ${resolved.map(row).join('')}
+        </div>` : ''}
+      </div>`;
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+/* ----- 推薦 ----- */
+async function renderAdminReco(content) {
+  try {
+    const data = await api('listRecommendations');
+    const list = data.recommendations || [];
+    content.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-apricot">RECOMMEND</p><h2 class="font-serif text-xl font-black">店家推薦</h2></div>
+          <button data-action="refresh-admin" class="rounded-xl bg-mist px-3 py-2 text-xs font-bold text-ledger">重新整理</button>
+        </div>
+        ${list.length ? `<div class="overflow-hidden rounded-2xl bg-white shadow-paper ring-1 ring-ledger/5">
+          ${list.map((r) => `
+            <div class="flex items-center justify-between border-b border-dashed border-ledger/10 px-4 py-3 last:border-b-0">
+              <div class="min-w-0">
+                <p class="text-sm font-bold text-ledger">🍜 ${escapeHtml(r.storeName)}</p>
+                ${r.note ? `<p class="text-xs text-slate-500">${escapeHtml(r.note)}</p>` : ''}
+                <p class="mt-0.5 text-[10px] text-slate-400">${escapeHtml(r.seatNo)} ${escapeHtml(r.studentName)} · ${activityTime(r.createdAt)}</p>
+              </div>
+              <button data-action="reco-delete" data-id="${r.id}" class="ml-3 shrink-0 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">刪除</button>
+            </div>`).join('')}
+        </div>` : '<p class="rounded-2xl bg-white/60 px-4 py-10 text-center text-sm text-slate-400">尚無推薦。</p>'}
+      </div>`;
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+/* ----- 請客 ----- */
+async function renderAdminTreat(content) {
+  try {
+    const data = await api('treatList');
+    const treats = data.treats || [];
+    const totalFree = treats.reduce((sum, t) => sum + Number(t.usedAmount || 0), 0);
+    content.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">TREAT</p><h2 class="font-serif text-xl font-black">請客管理</h2></div>
+          <button data-action="open-treat" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">＋ 建立請客</button>
+        </div>
+        <div class="rounded-2xl bg-gradient-to-r from-stamp to-ledger p-4 text-white shadow-paper">
+          <p class="text-[11px] font-bold tracking-[.13em] text-white/70">TOTAL FREE</p>
+          <p class="font-serif text-2xl font-black">累計免費 ${fmtMoney(totalFree)}</p>
+        </div>
+        ${treats.length ? `<div class="space-y-2">
+          ${treats.map((t) => `
+            <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+              <div class="flex items-center justify-between">
+                <p class="font-bold text-ledger">🎁 ${escapeHtml(t.title)} <span class="text-xs font-normal text-slate-400">by ${escapeHtml(t.hostSeat)} ${escapeHtml(t.hostName)}</span></p>
+                <button data-action="close-treat" data-id="${t.treatId}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">關閉</button>
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">每人上限</p><p class="font-black tabular-nums">${fmtMoney(t.capAmount)}</p></div>
+                <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">已免費</p><p class="font-black tabular-nums text-stamp">${fmtMoney(t.usedAmount)}</p></div>
+                <div class="rounded-lg bg-mist py-2"><p class="text-[10px] text-slate-500">剩餘</p><p class="font-black tabular-nums text-apricot">${fmtMoney(t.remaining)}</p></div>
+              </div>
+            </div>`).join('')}
+        </div>` : '<p class="rounded-2xl bg-white/60 px-4 py-10 text-center text-sm text-slate-400">目前沒有進行中的請客。</p>'}
+      </div>`;
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+/* ============================ 請假／請客／欠費／更新日誌／AI 設定 Modal ============================ */
+async function openLeaveModal() {
+  let myRequests = [];
+  try { myRequests = (await api('listLeave')).requests || []; } catch (_) { /* 忽略 */ }
+  const statusBadge = (s) => s === 'Approved' ? '<span class="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600">已批准</span>' : s === 'Rejected' ? '<span class="rounded bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-500">未批准</span>' : '<span class="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600">待審核</span>';
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+        <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">LEAVE</p><h2 class="font-serif text-xl font-black">申請請假</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <div class="flex-1 overflow-y-auto px-5 py-4">
+          <p class="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">當天請假須於上午 9:00 前申請；批准後當日訂單將取消並退費（若已繳）。</p>
+          <form id="leave-form" class="mt-3 space-y-3">
+            <div><label class="mb-1 block text-xs font-bold text-slate-500">請假日期</label><input name="leaveDate" type="date" min="${todayString()}" value="${todayString()}" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" /></div>
+            <div><label class="mb-1 block text-xs font-bold text-slate-500">原因（可選）</label><input name="reason" maxlength="120" placeholder="例如：感冒看醫生" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" /></div>
+            <button type="submit" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">送出申請</button>
+          </form>
+          ${myRequests.length ? `
+          <p class="mb-2 mt-5 text-sm font-bold text-ledger">我的請假紀錄</p>
+          <div class="space-y-2">
+            ${myRequests.map((r) => `
+              <div class="flex items-center justify-between rounded-xl bg-mist/50 px-3 py-2.5">
+                <div><p class="text-sm font-bold text-ledger">${escapeHtml(r.leaveDate)}</p>${r.reason ? `<p class="text-xs text-slate-500">${escapeHtml(r.reason)}</p>` : ''}</div>
+                ${statusBadge(r.status)}
+              </div>`).join('')}
+          </div>` : ''}
+        </div>
+      </section>
+    </div>`;
+  $('#leave-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await busy(async () => {
+        await api('createLeave', { leaveDate: event.target.leaveDate.value, reason: event.target.reason.value });
+        closeModal();
+        toast('請假申請已送出，等待管理者處理。', 'success');
+      });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function openTreatModal() {
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">TREAT</p><h2 class="font-serif text-xl font-black">發起請客</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <p class="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-600">設定「每人/每單」免費上限，超過的部分由對方自補差價。你可隨時關閉。</p>
+        <form id="treat-form" class="mt-4 space-y-3">
+          <div><label class="mb-1 block text-xs font-bold text-slate-500">名稱（可選）</label><input name="title" maxlength="40" placeholder="例如：慶祝段考結束" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" /></div>
+          <div><label class="mb-1 block text-xs font-bold text-slate-500">每人免費上限（元）</label><input name="capAmount" type="number" inputmode="decimal" min="1" placeholder="例如 100" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" /></div>
+          <button type="submit" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">建立請客</button>
+        </form>
+      </section>
+    </div>`;
+  $('#treat-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await busy(async () => {
+        await api('treatCreate', { title: event.target.title.value, capAmount: Number(event.target.capAmount.value) });
+        state.boot = await api('getBootstrap');
+        closeModal();
+        toast('請客已建立！其他人下單時可選擇折抵。', 'success');
+      });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function openDebtModal() {
+  try {
+    const data = await api('myDebt');
+    modalRoot.innerHTML = `
+      <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+        <section class="sheet-enter flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+          <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+            <div><p class="text-[11px] font-bold tracking-[.13em] text-apricot">CUSTOM DEBT</p><h2 class="font-serif text-xl font-black">我的自訂欠費</h2></div>
+            <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 py-4">
+            <div class="mb-3 flex items-center justify-between rounded-xl ${data.total > 0 ? 'bg-red-50' : 'bg-emerald-50'} px-4 py-3">
+              <span class="text-sm font-bold ${data.total > 0 ? 'text-red-600' : 'text-emerald-600'}">目前自訂欠費總額</span>
+              <span class="font-serif text-2xl font-black ${data.total > 0 ? 'text-red-600' : 'text-emerald-600'}">${fmtMoney(data.total)}</span>
+            </div>
+            ${data.entries.length ? data.entries.map((e) => `
+              <div class="mb-2 flex items-center justify-between rounded-xl bg-mist/50 px-3 py-2.5">
+                <div><p class="text-sm font-bold text-ledger">${escapeHtml(e.note)}</p><p class="text-[10px] text-slate-400">${activityTime(e.createdAt)}</p></div>
+                <span class="font-bold tabular-nums ${e.amount > 0 ? 'text-red-600' : 'text-emerald-600'}">${e.amount > 0 ? '+' : ''}${money(e.amount)}</span>
+              </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">沒有自訂欠費紀錄。</p>'}
+            <p class="mt-2 text-[11px] leading-5 text-slate-400">此為管理員另行登記的費用（非訂餐費用），有疑問請洽管理員。</p>
+          </div>
+        </section>
+      </div>`;
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function openUserDebtModal(userId) {
+  try {
+    const data = await api('adminListDebts', { userId });
+    const renderList = (d) => {
+      const listEl = $('#debt-list');
+      const totalEl = $('#debt-total');
+      if (!listEl) return;
+      listEl.innerHTML = d.entries.length ? d.entries.map((e) => `
+        <div class="flex items-center justify-between rounded-xl bg-mist/50 px-3 py-2.5">
+          <div><p class="text-sm font-bold text-ledger">${escapeHtml(e.note)}</p><p class="text-[10px] text-slate-400">${activityTime(e.createdAt)}</p></div>
+          <div class="flex items-center gap-2">
+            <span class="font-bold tabular-nums ${e.amount > 0 ? 'text-red-600' : 'text-emerald-600'}">${e.amount > 0 ? '+' : ''}${money(e.amount)}</span>
+            <button data-action="del-debt" data-id="${e.id}" data-user="${userId}" class="rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600">刪除</button>
+          </div>
+        </div>`).join('') : '<p class="py-6 text-center text-sm text-slate-400">尚無紀錄。</p>';
+      if (totalEl) totalEl.textContent = fmtMoney(d.total);
+    };
+    modalRoot.innerHTML = `
+      <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+        <section class="sheet-enter flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+          <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+            <div><p class="text-[11px] font-bold tracking-[.13em] text-apricot">CUSTOM DEBT</p><h2 class="font-serif text-xl font-black">${escapeHtml(data.seatNo)} ${escapeHtml(data.studentName)} 的欠費</h2></div>
+            <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 py-4">
+            <div class="mb-3 flex items-center justify-between rounded-xl bg-red-50 px-4 py-3">
+              <span class="text-sm font-bold text-red-600">自訂欠費總額</span>
+              <span id="debt-total" class="font-serif text-2xl font-black text-red-600">${fmtMoney(data.total)}</span>
+            </div>
+            <div id="debt-list"></div>
+            <div class="mt-3 rounded-xl border border-dashed border-ledger/20 p-3">
+              <p class="text-xs font-bold text-slate-500">新增／減免（正數=增加欠費，負數=還款/減免）</p>
+              <div class="mt-2 flex gap-2">
+                <input id="debt-amount" type="number" inputmode="decimal" placeholder="金額（可負）" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ledger" />
+                <input id="debt-note" maxlength="120" placeholder="說明" class="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ledger" />
+              </div>
+              <button id="add-debt-btn" class="mt-2 w-full rounded-xl bg-ledger py-2.5 text-sm font-bold text-white">新增</button>
+            </div>
+          </div>
+        </section>
+      </div>`;
+    renderList(data);
+    $('#add-debt-btn').addEventListener('click', async () => {
+      const amount = Number($('#debt-amount').value);
+      const note = $('#debt-note').value;
+      if (!amount) return toast('請輸入金額。', 'error');
+      try {
+        await busy(async () => {
+          await api('adminAddDebt', { userId, amount, note });
+          const fresh = await api('adminListDebts', { userId });
+          renderList(fresh);
+        });
+        toast('已更新欠費。', 'success');
+      } catch (error) { toast(error.message, 'error'); }
+    });
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function openChangelogModal() {
+  try {
+    const data = await api('getChangelog');
+    const list = data.changelog || [];
+    modalRoot.innerHTML = `
+      <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+        <section class="sheet-enter flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+          <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+            <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">CHANGELOG</p><h2 class="font-serif text-xl font-black">更新日誌</h2></div>
+            <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 py-4">
+            ${list.length ? list.map((c) => `
+              <div class="mb-3 rounded-xl bg-mist/50 p-3.5">
+                <div class="flex items-center gap-2">
+                  <span class="rounded-full bg-ledger px-2 py-0.5 text-[10px] font-bold text-white">${escapeHtml(c.version)}</span>
+                  <span class="font-bold text-ledger">${escapeHtml(c.title)}</span>
+                </div>
+                <p class="mt-1.5 whitespace-pre-line text-xs leading-5 text-slate-600">${escapeHtml(c.body)}</p>
+                <p class="mt-1 text-[10px] text-slate-400">${activityTime(c.createdAt)}</p>
+              </div>`).join('') : '<p class="py-8 text-center text-sm text-slate-400">尚無更新日誌。</p>'}
+          </div>
+        </section>
+      </div>`;
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function openManageChangelogModal() {
+  try {
+    const data = await api('getChangelog');
+    const list = data.changelog || [];
+    const renderList = (l) => {
+      const listEl = $('#cl-list');
+      if (!listEl) return;
+      listEl.innerHTML = l.length ? l.map((c) => `
+        <div class="flex items-center justify-between rounded-xl bg-mist/50 px-3 py-2.5">
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(c.version)} ${escapeHtml(c.title)}</p></div>
+          <button data-action="del-changelog" data-id="${c.id}" class="ml-2 shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600">刪除</button>
+        </div>`).join('') : '<p class="py-6 text-center text-sm text-slate-400">尚無日誌。</p>';
+    };
+    modalRoot.innerHTML = `
+      <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+        <section class="sheet-enter flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[1.5rem] bg-white">
+          <div class="flex items-center justify-between border-b border-ledger/10 px-5 py-4">
+            <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">CHANGELOG</p><h2 class="font-serif text-xl font-black">更新日誌管理</h2></div>
+            <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 py-4">
+            <div class="rounded-xl border border-dashed border-ledger/20 p-3">
+              <p class="text-xs font-bold text-slate-500">新增日誌</p>
+              <input id="cl-version" maxlength="20" placeholder="版本（例如 v3.2.0）" class="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ledger" />
+              <input id="cl-title" maxlength="60" placeholder="標題" class="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ledger" />
+              <textarea id="cl-body" rows="3" maxlength="1000" placeholder="內容" class="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-ledger"></textarea>
+              <button id="cl-add" class="mt-2 w-full rounded-xl bg-ledger py-2.5 text-sm font-bold text-white">新增</button>
+            </div>
+            <div id="cl-list" class="mt-3 space-y-2"></div>
+          </div>
+        </section>
+      </div>`;
+    renderList(list);
+    $('#cl-add').addEventListener('click', async () => {
+      try {
+        await busy(async () => {
+          await api('adminAddChangelog', { version: $('#cl-version').value, title: $('#cl-title').value, body: $('#cl-body').value });
+          const fresh = await api('getChangelog');
+          renderList(fresh.changelog || []);
+        });
+        toast('日誌已新增。', 'success');
+      } catch (error) { toast(error.message, 'error'); }
+    });
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function openAiSettingsModal() {
+  let s;
+  try { s = await api('aiGetSettings'); } catch (e) { toast(e.message, 'error'); return; }
+  const provider = s.provider || 'auto';
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">
+      <section class="sheet-enter w-full max-w-md rounded-t-[1.5rem] bg-white p-6">
+        <div class="flex items-center justify-between">
+          <div><p class="text-[11px] font-bold tracking-[.13em] text-stamp">AI SETTINGS</p><h2 class="font-serif text-xl font-black">AI 圖片辨識設定</h2></div>
+          <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
+        </div>
+        <p class="mt-3 rounded-lg bg-mist/60 px-3 py-2 text-xs text-slate-500">用於菜單／行事曆圖片辨識。金鑰僅存於伺服器，不會回傳顯示。${s.envFallback ? '目前使用環境變數金鑰（備援）。' : ''}</p>
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">辨識供應商</label>
+            <select id="ai-provider" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger">
+              <option value="auto" ${provider === 'auto' ? 'selected' : ''}>自動（有金鑰者優先）</option>
+              <option value="gemini" ${provider === 'gemini' ? 'selected' : ''}>Google Gemini</option>
+              <option value="openai" ${provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">Gemini API 金鑰 ${s.geminiKeySet ? '（已設定）' : ''}</label>
+            <input id="ai-gemini-key" type="password" placeholder="留空＝不變更" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">Gemini 模型（選用）</label>
+            <input id="ai-gemini-model" value="${escapeHtml(s.geminiModel || '')}" placeholder="留空＝使用預設備援鏈" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">OpenAI API 金鑰 ${s.openaiKeySet ? '（已設定）' : ''}</label>
+            <input id="ai-openai-key" type="password" placeholder="留空＝不變更" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-bold text-slate-500">OpenAI 模型（選用）</label>
+            <input id="ai-openai-model" value="${escapeHtml(s.openaiModel || '')}" placeholder="預設 gpt-4o-mini" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" />
+          </div>
+          <button id="ai-save" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">儲存設定</button>
+        </div>
+      </section>
+    </div>`;
+  $('#ai-save').addEventListener('click', async () => {
+    try {
+      await busy(async () => {
+        await api('aiSaveSettings', {
+          provider: $('#ai-provider').value,
+          geminiApiKey: $('#ai-gemini-key').value.trim(),
+          openaiApiKey: $('#ai-openai-key').value.trim(),
+          geminiModel: $('#ai-gemini-model').value.trim(),
+          openaiModel: $('#ai-openai-model').value.trim(),
+        });
+        closeModal();
+        toast('AI 辨識設定已儲存。', 'success');
+      });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function openManageDebtModal() {
+  const res = await api('adminListUsers');
+  const users = res.users;
+  promptModal('自訂欠費（選擇同學）', [{ name: 'seatNo', label: '座號／學號', type: 'text', placeholder: '例如 05' }], async (v) => {
+    const raw = v.seatNo.trim();
+    const padded = /^\d+$/.test(raw) ? raw.padStart(2, '0') : raw;
+    const target = users.find((u) => u.seatNo === raw || u.studentNo === raw || u.seatNo === padded || u.studentNo === padded);
+    if (!target) return toast('找不到此座號／學號的同學。', 'error');
+    await openUserDebtModal(target.id);
+  });
 }
 
 /* ----- 設定 ----- */
@@ -1349,6 +1847,18 @@ function renderSettingsHtml(content) {
       <button data-action="view-overdue" class="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-paper ring-1 ring-ledger/5">
         <p class="font-bold text-red-600">欠繳催繳名單</p>
         <p class="mt-0.5 text-xs text-slate-500">顯示所有仍有現金欠款的同學</p>
+      </button>
+      <button data-action="ai-settings" class="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-paper ring-1 ring-ledger/5">
+        <p class="font-bold text-ledger">🤖 AI 辨識設定</p>
+        <p class="mt-0.5 text-xs text-slate-500">設定圖片辨識的 AI 供應商與金鑰（Gemini／OpenAI）</p>
+      </button>
+      <button data-action="manage-changelog" class="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-paper ring-1 ring-ledger/5">
+        <p class="font-bold text-ledger">📝 更新日誌管理</p>
+        <p class="mt-0.5 text-xs text-slate-500">新增／刪除功能更新紀錄</p>
+      </button>
+      <button data-action="manage-debt" class="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-paper ring-1 ring-ledger/5">
+        <p class="font-bold text-ledger">🧾 自訂欠費管理</p>
+        <p class="mt-0.5 text-xs text-slate-500">為某位同學新增或減免欠費</p>
       </button>
       <div class="rounded-2xl bg-red-50 p-5 ring-1 ring-red-100">
       <div class="rounded-2xl bg-white p-5 shadow-paper ring-1 ring-ledger/5">
@@ -1418,11 +1928,11 @@ function renderSettingsView(root) {
       <div class="rounded-[1.5rem] bg-white p-5 shadow-paper ring-1 ring-ledger/5">
         <div class="flex items-center gap-4">
           <span class="grid h-14 w-14 place-items-center rounded-2xl bg-ledger text-xl font-black text-white">${escapeHtml((user.seatNo || '?').slice(-2))}</span>
-          <div><h1 class="font-serif text-xl font-black">${escapeHtml(user.name)}</h1><p class="mt-1 text-sm text-slate-500">座號 ${escapeHtml(user.studentNo)} · ${user.role === 'Admin' ? '管理者' : '一般學生'}</p></div>
+          <div><h1 class="font-serif text-xl font-black">${escapeHtml(user.name)}</h1><p class="mt-1 text-sm text-slate-500">座號 ${escapeHtml(user.studentNo)} · ${user.role === 'Admin' ? '管理者' : user.role === 'Teacher' ? '師長' : '一般學生'}</p></div>
         </div>
         <div class="mt-5 grid grid-cols-2 gap-2">
           <div class="rounded-xl bg-mist px-3 py-3"><p class="text-[11px] font-bold text-slate-500">儲值餘額</p><p class="mt-1 font-bold tabular-nums text-stamp">${fmtMoney(user.walletBalance)}</p></div>
-          <div class="rounded-xl bg-mist px-3 py-3"><p class="text-[11px] font-bold text-slate-500">帳號權限</p><p class="mt-1 font-bold text-ledger">${user.role === 'Admin' ? '管理者' : '學生'}</p></div>
+          <div class="rounded-xl bg-mist px-3 py-3"><p class="text-[11px] font-bold text-slate-500">帳號權限</p><p class="mt-1 font-bold text-ledger">${user.role === 'Admin' ? '管理者' : user.role === 'Teacher' ? '師長' : '學生'}</p></div>
         </div>
       </div>
 
@@ -1442,6 +1952,10 @@ function renderSettingsView(root) {
         <div class="mx-5 h-px bg-slate-100"></div>
         <button data-action="change-name" class="flex w-full items-center justify-between px-5 py-4 text-left">
           <span><span class="block font-bold">修改姓名</span><span class="mt-1 block text-xs text-slate-500">更新你顯示在系統中的姓名。</span></span><span class="text-ledger">›</span>
+        </button>
+        <div class="mx-5 h-px bg-slate-100"></div>
+        <button data-action="open-changelog" class="flex w-full items-center justify-between px-5 py-4 text-left">
+          <span><span class="block font-bold">更新日誌</span><span class="mt-1 block text-xs text-slate-500">查看訂餐通的功能更新紀錄。</span></span><span class="text-ledger">›</span>
         </button>
         <div class="mx-5 h-px bg-slate-100"></div>
         <button data-action="logout" class="flex w-full items-center justify-between px-5 py-4 text-left text-red-600">
@@ -1610,7 +2124,10 @@ function verifyResultHtml(result) {
     const rows = result.unpaidOrders.length ? result.unpaidOrders.map((order) => `
         <div class="mt-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
           <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
-          <span class="ml-2 shrink-0 font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+          <div class="ml-2 flex shrink-0 items-center gap-2">
+            <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+            <button data-action="partial-pay" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-stamp ring-1 ring-stamp/20">部分繳</button>
+          </div>
         </div>`).join('') : '';
     return `${head('繳費 · 餘額 ' + fmtMoney(result.walletBalance))}
       <div class="mt-4 flex items-center justify-between rounded-xl bg-red-50 px-4 py-3">
@@ -1699,11 +2216,52 @@ function closeModal() {
   if (state.scanner) { try { state.scanner.stop(); } catch (_) {} state.scanner = null; }
 }
 
+function headerSubtitle() {
+  if (state.user?.role === 'Teacher') return '師長';
+  return state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳';
+}
+
+// 可拉動捲軸：右側浮動拖曳列，可快速滑動長頁面
+function initScrollbar() {
+  if (document.getElementById('scroll-drag')) return;
+  const bar = document.createElement('div');
+  bar.id = 'scroll-drag';
+  bar.innerHTML = '<div id="scroll-drag-thumb"></div>';
+  document.body.appendChild(bar);
+  const thumb = bar.querySelector('#scroll-drag-thumb');
+  let dragging = false;
+
+  const update = () => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    if (max <= 60) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    const trackH = bar.clientHeight - 48;
+    const pct = window.scrollY / max;
+    thumb.style.transform = `translateY(${pct * trackH}px)`;
+  };
+  const moveTo = (clientY) => {
+    const rect = bar.getBoundingClientRect();
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const trackH = rect.height - 48;
+    if (trackH <= 0) return;
+    const pct = Math.max(0, Math.min(1, (clientY - rect.top - 24) / trackH));
+    window.scrollTo(0, pct * max);
+  };
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update);
+  if (window.ResizeObserver) new ResizeObserver(update).observe(document.body);
+  thumb.addEventListener('pointerdown', (e) => { dragging = true; thumb.setPointerCapture(e.pointerId); moveTo(e.clientY); });
+  thumb.addEventListener('pointermove', (e) => { if (dragging) moveTo(e.clientY); });
+  thumb.addEventListener('pointerup', () => { dragging = false; });
+  thumb.addEventListener('pointercancel', () => { dragging = false; });
+  update();
+}
+
 function syncHeader() {
   const walletEl = $('#header-wallet');
   if (walletEl) walletEl.textContent = fmtMoney(state.user.walletBalance);
   const subEl = $('#header-subtitle');
-  if (subEl) subEl.textContent = state.boot?.pureBalanceMode ? '純儲值模式' : '訂餐手帳';
+  if (subEl) subEl.textContent = headerSubtitle();
 }
 
 async function refreshBoot() {
@@ -2099,6 +2657,65 @@ async function handleAction(action, target) {
       });
       break;
     }
+
+    // 推薦菜單
+    case 'submit-recommendation': {
+      const storeName = $('#reco-store')?.value.trim();
+      if (!storeName) return toast('請輸入店家名稱。', 'error');
+      await busy(async () => {
+        await api('createRecommendation', { storeName, note: ($('#reco-note')?.value || '').trim() });
+        const storeEl = $('#reco-store'); const noteEl = $('#reco-note');
+        if (storeEl) storeEl.value = '';
+        if (noteEl) noteEl.value = '';
+        toast('已送出推薦！', 'success');
+      });
+      break;
+    }
+    case 'reco-delete': openConfirm('刪除推薦', '確定刪除此推薦嗎？', async () => { await api('adminDeleteRecommendation', { id: target.getAttribute('data-id') }); await refreshAdmin(); }); break;
+
+    // 請假
+    case 'open-leave': await openLeaveModal(); break;
+    case 'approve-leave': openConfirm('批准請假', '批准後將取消該日訂單並退費（若已繳）。確定嗎？', async () => { await api('adminResolveLeave', { id: target.getAttribute('data-id'), approve: true }); toast('已批准請假。', 'success'); await refreshAdmin(); }); break;
+    case 'reject-leave': openConfirm('駁回請假', '確定駁回此請假申請嗎？申請者會收到通知。', async () => { await api('adminResolveLeave', { id: target.getAttribute('data-id'), approve: false }); toast('已駁回請假。', 'success'); await refreshAdmin(); }); break;
+
+    // 請客
+    case 'open-treat': openTreatModal(); break;
+    case 'close-treat': openConfirm('關閉請客', '關閉後其他人下單時將無法再選擇此請客。', async () => { await api('treatClose', { treatId: target.getAttribute('data-id') }); toast('已關閉請客。', 'success'); await refreshAdmin(); }); break;
+
+    // 自訂欠費
+    case 'open-debt': await openDebtModal(); break;
+    case 'user-debt': await openUserDebtModal(target.getAttribute('data-user')); break;
+    case 'del-debt': openConfirm('刪除欠費紀錄', '將刪除此筆欠費紀錄（不影響其他資料）。', async () => { await api('adminDeleteDebt', { id: target.getAttribute('data-id') }); await openUserDebtModal(target.getAttribute('data-user')); }); break;
+    case 'manage-debt': await openManageDebtModal(); break;
+
+    // 更新日誌
+    case 'open-changelog': await openChangelogModal(); break;
+    case 'manage-changelog': await openManageChangelogModal(); break;
+    case 'del-changelog': openConfirm('刪除日誌', '確定刪除此更新日誌嗎？', async () => { await api('adminDeleteChangelog', { id: target.getAttribute('data-id') }); await openManageChangelogModal(); }); break;
+
+    // AI 設定
+    case 'ai-settings': await openAiSettingsModal(); break;
+
+    // 部分繳費
+    case 'partial-pay': {
+      const orderId = target.getAttribute('data-order');
+      const userId = target.getAttribute('data-user');
+      promptModal('部分繳費', [{ name: 'amount', label: '繳費金額（元）', type: 'number' }], async (v) => {
+        const amount = Number(v.amount);
+        if (!amount || amount <= 0) return toast('請輸入正確金額。', 'error');
+        const r = await api('adminPartialPay', { userId, orderId, amount });
+        toast(`已繳 $${money(r.applied)}，尚欠 $${money(r.outstanding)}。`, 'success');
+        await refreshAdmin();
+      });
+      break;
+    }
+
+    // 師長角色
+    case 'set-role-teacher': await withAdminRefresh(async () => { await api('adminSetRole', { userId: target.getAttribute('data-user'), role: 'Teacher' }); toast('已設為師長。', 'success'); }); break;
+    case 'set-role-student': await withAdminRefresh(async () => { await api('adminSetRole', { userId: target.getAttribute('data-user'), role: 'Student' }); toast('已設為學生。', 'success'); }); break;
+
+    // 重新整理管理頁
+    case 'refresh-admin': await refreshAdmin(); break;
 
     default: break;
   }
@@ -2505,6 +3122,10 @@ function openItemEditor(storeId, itemId) {
           <input id="item-name" value="${escapeHtml(item?.name || '')}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" placeholder="例如 火腿蛋吐司" />
           <label class="mb-1 block text-xs font-bold text-slate-500">價格（元）</label>
           <input id="item-price" type="number" inputmode="decimal" value="${item ? item.price : ''}" class="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-ledger" placeholder="例如 45" />
+          <label class="mb-3 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <input id="item-vegetarian" type="checkbox" ${item?.vegetarian ? 'checked' : ''} class="h-5 w-5 accent-emerald-600" />
+            <span>此品項為素食 <span class="veg-badge ml-1">🌱</span></span>
+          </label>
           <label class="mb-1 block text-xs font-bold text-slate-500">選項（每行一個；加價用「名稱:價格」；必選（擇一）用「名稱:價格:群組」）</label>
           <textarea id="item-options" rows="4" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-ledger" placeholder="可選：加珍珠:10&#10;必選：大:10:大小&#10;必選：小:0:大小">${escapeHtml(optionsText)}</textarea>
         </div>
@@ -2529,7 +3150,7 @@ async function saveItem(itemId) {
   const storeId = $('#item-store').value;
   try {
     await busy(async () => {
-      await api('adminSaveMenuItem', { storeId, itemId: itemId || undefined, name, price, options });
+      await api('adminSaveMenuItem', { storeId, itemId: itemId || undefined, name, price, options, isVegetarian: $('#item-vegetarian')?.checked || false });
       closeModal();
       renderView();
     });

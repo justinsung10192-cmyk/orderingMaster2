@@ -3,6 +3,7 @@
 //   1) 店家菜單：單一店家的品項與價格（aiRecognizeMenu）
 //   2) 每月菜單：學校內訂菜單，每天日期＋店家＋品項（aiRecognizeMonthlyMenu，每月更新）
 import { appError, num, round2 } from '../_lib/util.js';
+import { getAppSetting } from '../_lib/db.js';
 
 const PROMPT = `你是菜單文字辨識助手。請辨識這張菜單照片上的「所有」品項（一個都不能漏、不能省略），並標出每個品項的價格、類型與選項。
 規則：
@@ -288,15 +289,24 @@ function geminiError(status, message) {
 // 預設模型備援鏈：穩定版優先（gemini-3.6/3.5 實測穩定；3.8/3.7 最新但常回 503 過載）
 const GEMINI_MODEL_CHAIN = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash'];
 
-function geminiModels() {
-  const custom = String(process.env.GEMINI_MODEL || '').trim();
+// 讀取 AI 辨識設定（管理員可於後台設定，覆蓋環境變數；未設定則用 env 備援）
+async function getAiConfig(classId) {
+  const provider = (await getAppSetting(classId, 'ai_provider', 'auto')) || 'auto';
+  const geminiKey = (await getAppSetting(classId, 'ai_gemini_key', '')) || process.env.GEMINI_API_KEY || '';
+  const openaiKey = (await getAppSetting(classId, 'ai_openai_key', '')) || process.env.OPENAI_API_KEY || '';
+  const geminiModel = (await getAppSetting(classId, 'ai_gemini_model', '')) || process.env.GEMINI_MODEL || '';
+  const openaiModel = (await getAppSetting(classId, 'ai_openai_model', '')) || 'gpt-4o-mini';
+  return { provider, geminiKey, openaiKey, geminiModel, openaiModel };
+}
+
+function geminiModels(customModel) {
+  const custom = String(customModel || '').trim();
   if (!custom) return GEMINI_MODEL_CHAIN;
   return [custom, ...GEMINI_MODEL_CHAIN.filter((model) => model !== custom)];
 }
 
-async function geminiParse(imageBase64, mimeType, prompt) {
-  const apiKey = process.env.GEMINI_API_KEY || '';
-  const models = geminiModels();
+async function geminiParse(imageBase64, mimeType, prompt, apiKey, model) {
+  const models = geminiModels(model);
   let lastError = '';
 
   for (const model of models) {
@@ -334,11 +344,10 @@ async function geminiParse(imageBase64, mimeType, prompt) {
   throw new Error(lastError || 'Gemini API 暫時無法使用，請稍後再試。');
 }
 
-async function openaiParse(imageBase64, mimeType, prompt) {
-  const apiKey = process.env.OPENAI_API_KEY || '';
+async function openaiParse(imageBase64, mimeType, prompt, apiKey, model) {
   const url = 'https://api.openai.com/v1/chat/completions';
   const body = {
-    model: 'gpt-4o-mini',
+    model: model || 'gpt-4o-mini',
     messages: [
       { role: 'system', content: '你只輸出合法的 JSON，不輸出任何其他內容。' },
       {
@@ -370,53 +379,55 @@ function validateImage(data) {
   return { imageBase64, mimeType };
 }
 
-async function recognize(imageBase64, mimeType, prompt, normalizer) {
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY);
-  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY);
-  if (!hasGemini && !hasOpenAI) {
-    throw appError('NO_AI_KEY', '尚未設定 AI 辨識金鑰（GEMINI_API_KEY 或 OPENAI_API_KEY）。');
+async function recognize(imageBase64, mimeType, prompt, normalizer, classId) {
+  const cfg = await getAiConfig(classId || '');
+  const providerChoice = cfg.provider === 'gemini' ? 'gemini' : cfg.provider === 'openai' ? 'openai' : 'auto';
+  const useGemini = providerChoice === 'auto' ? Boolean(cfg.geminiKey) : providerChoice === 'gemini';
+  const useOpenAI = providerChoice === 'auto' ? Boolean(cfg.openaiKey) : providerChoice === 'openai';
+  if (!useGemini && !useOpenAI) {
+    throw appError('NO_AI_KEY', '尚未設定 AI 辨識金鑰。請在「管理 → 設定 → AI 辨識設定」填寫 Gemini 或 OpenAI 金鑰，或設定環境變數 GEMINI_API_KEY / OPENAI_API_KEY。');
   }
 
   let parsed;
   let provider = '';
-  if (hasGemini) {
+  if (useGemini) {
     try {
-      parsed = await geminiParse(imageBase64, mimeType, prompt);
+      parsed = await geminiParse(imageBase64, mimeType, prompt, cfg.geminiKey, cfg.geminiModel);
       provider = 'gemini';
     } catch (error) {
-      if (!hasOpenAI) throw appError('AI_FAILED', `菜單辨識失敗：${error.message}。請檢查 GEMINI_API_KEY 是否有效（或用 GEMINI_MODEL 指定模型），或設定 OPENAI_API_KEY 作為備援。`);
+      if (!useOpenAI) throw appError('AI_FAILED', `菜單辨識失敗：${error.message}。請檢查 GEMINI_API_KEY 是否有效（或用 GEMINI_MODEL 指定模型），或設定 OPENAI_API_KEY 作為備援。`);
     }
   }
-  if (!parsed && hasOpenAI) {
-    parsed = await openaiParse(imageBase64, mimeType, prompt);
+  if (!parsed && useOpenAI) {
+    parsed = await openaiParse(imageBase64, mimeType, prompt, cfg.openaiKey, cfg.openaiModel);
     provider = 'openai';
   }
   return { provider, result: normalizer(parsed || []) };
 }
 
 export const actions = {
-  async aiRecognizeMenu(data) {
+  async aiRecognizeMenu(data, ctx) {
     const { imageBase64, mimeType } = validateImage(data);
-    const { provider, result } = await recognize(imageBase64, mimeType, PROMPT, normalizeItems);
+    const { provider, result } = await recognize(imageBase64, mimeType, PROMPT, normalizeItems, ctx.classId);
     return { provider, items: applySmartOptions(mergeSizeVariants(result)) };
   },
 
-  async aiRecognizeMonthlyMenu(data) {
+  async aiRecognizeMonthlyMenu(data, ctx) {
     const { imageBase64, mimeType } = validateImage(data);
     const month = String(data.month || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇菜單月份。');
-    const { provider, result } = await recognize(imageBase64, mimeType, monthlyPrompt(month), normalizeMonthly);
+    const { provider, result } = await recognize(imageBase64, mimeType, monthlyPrompt(month), normalizeMonthly, ctx.classId);
     return { provider, entries: result };
   },
 
   // 行事曆 AI 辨識：從照片/通知中辨識事件（日期、名稱、類別）
-  async calendarAiRecognize(data) {
+  async calendarAiRecognize(data, ctx) {
     const { imageBase64, mimeType } = validateImage(data);
     const month = String(data.month || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) throw appError('INVALID_INPUT', '請選擇月份。');
     const [year, mon] = month.split('-');
     const normalizer = (parsed) => normalizeCalendar(parsed, year, mon);
-    const { provider, result } = await recognize(imageBase64, mimeType, calendarPrompt(month), normalizer);
+    const { provider, result } = await recognize(imageBase64, mimeType, calendarPrompt(month), normalizer, ctx.classId);
     return { provider, events: result };
   },
 };

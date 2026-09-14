@@ -216,7 +216,7 @@ export const actions = {
     const seatNo = String(data.seatNo || '').trim();
     const studentName = String(data.studentName || '').trim();
     const password = String(data.password || '');
-    const role = data.role === 'Admin' ? 'Admin' : 'Student';
+    const role = data.role === 'Admin' ? 'Admin' : data.role === 'Teacher' ? 'Teacher' : 'Student';
     if (!/^\d{1,30}$/.test(studentNo)) throw appError('INVALID_INPUT', '座號/學號格式不正確。');
     if (!studentName) throw appError('INVALID_INPUT', '請填寫姓名。');
     if (!password || password.length < 8) throw appError('WEAK_PASSWORD', '初始密碼至少須為 8 個字元。');
@@ -277,8 +277,8 @@ export const actions = {
   async adminSetRole(data, ctx) {
     const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
     if (!target) throw appError('NOT_FOUND', '找不到使用者。');
-    const role = data.role === 'Admin' ? 'Admin' : 'Student';
-    if (role === 'Student' && target.role === 'Admin') {
+    const role = data.role === 'Admin' ? 'Admin' : data.role === 'Teacher' ? 'Teacher' : 'Student';
+    if (role !== 'Admin' && target.role === 'Admin') {
       await ensureNotLastAdmin(ctx.classId, target.id);
     }
     await updateRows('users', { id: target.id }, { role });

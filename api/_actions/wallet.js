@@ -9,6 +9,7 @@ const KIND_LABEL = {
   Cash: '現金',
   Refund: '退款',
   Manual: '手動調整',
+  Treat: '請客折抵',
 };
 
 export const actions = {
@@ -23,6 +24,8 @@ export const actions = {
     const allOrders = await listRows('orders', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
     const activeOrders = allOrders.filter((order) => !order.is_deleted);
     const cashUnpaid = round2(activeOrders.reduce((sum, order) => sum + outstandingOf(order), 0));
+    const debtRows = await listRows('custom_debts', { classId: ctx.classId, filters: { user_id: ctx.user.id } });
+    const customDebt = round2(debtRows.reduce((sum, row) => sum + num(row.amount), 0));
     const freshUser = await findOne('users', { id: ctx.user.id });
 
     const sessionIds = [...new Set(activeOrders.map((order) => order.session_id))];
@@ -38,6 +41,7 @@ export const actions = {
     return {
       user: publicUser(freshUser),
       cashUnpaid,
+      customDebt,
       transactions: transactions.map((transaction) => ({
         type: KIND_LABEL[transaction.kind] || transaction.kind,
         amount: num(transaction.amount),
@@ -136,5 +140,21 @@ export const actions = {
       p_note: note,
     });
     return { ok: true, walletBalance: num(result.wallet_balance) };
+  },
+
+  // 部分繳費：現金只繳一部分（剩餘仍欠）
+  async adminPartialPay(data, ctx) {
+    const target = await findOne('users', { id: Number(data.userId) }, ctx.classId);
+    if (!target) throw appError('NOT_FOUND', '找不到使用者。');
+    const orderId = Number(data.orderId);
+    const amount = Number(data.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw appError('INVALID_INPUT', '請輸入正確的繳費金額。');
+    const result = await callRpc('fn_partial_pay', {
+      p_class_id: ctx.classId,
+      p_user_id: target.id,
+      p_order_id: orderId,
+      p_amount: amount,
+    });
+    return { ok: true, applied: num(result.applied), outstanding: num(result.outstanding) };
   },
 };

@@ -13,6 +13,7 @@ import { actions as adminActions } from './_actions/admin.js';
 import { actions as aiActions } from './_actions/ai.js';
 import { actions as pushActions } from './_actions/push.js';
 import { actions as calendarActions } from './_actions/calendar.js';
+import { actions as featuresActions } from './_actions/features.js';
 
 const HANDLERS = {
   ...authActions,
@@ -26,9 +27,18 @@ const HANDLERS = {
   ...aiActions,
   ...pushActions,
   ...calendarActions,
+  ...featuresActions,
 };
 
 const PUBLIC = new Set(['getPublicConfig', 'login']);
+
+// 師長帳號：只能使用行事曆與個人設定（不可訂餐、投票、錢包、請假等）
+const TEACHER_ALLOWED = new Set([
+  'getBootstrap', 'getSession',
+  'calendarList', 'calendarCreate', 'calendarUpdate', 'calendarDelete',
+  'completeSetup', 'updateProfile', 'changePassword', 'logout',
+  'pushSubscribe', 'pushUnsubscribe', 'getChangelog',
+]);
 
 const ADMIN = new Set([
   'adminSaveSession',
@@ -49,6 +59,7 @@ const ADMIN = new Set([
   'adminBatchSaveMenuItems',
   'adminTopUp',
   'adminSettleCash',
+  'adminPartialPay',
   'adminSettleWeek',
   'adminManualBalance',
   'adminResolveVerification',
@@ -89,9 +100,22 @@ const ADMIN = new Set([
   'adminBroadcast',
   'adminGetPushStatus',
   'calendarLogs',
+  'aiGetSettings',
+  'aiSaveSettings',
+  'treatClose',
+  'adminListLeave',
+  'adminResolveLeave',
+  'adminListDebts',
+  'adminAddDebt',
+  'adminDeleteDebt',
+  'adminDeleteRecommendation',
+  'adminAddChangelog',
+  'adminDeleteChangelog',
 ]);
 
 export const config = { api: { bodyParser: false } };
+
+export const maxDuration = 60;
 
 export default async function handler(req, res) {
   try {
@@ -111,6 +135,9 @@ export default async function handler(req, res) {
       ctx.classId = ctx.user.class_id;
       if (ADMIN.has(action) && ctx.user.role !== 'Admin') {
         throw appError('FORBIDDEN', '需要管理員權限。');
+      }
+      if (ctx.user.role === 'Teacher' && !TEACHER_ALLOWED.has(action)) {
+        throw appError('FORBIDDEN', '師長帳號僅能使用行事曆與個人設定。');
       }
     }
 
