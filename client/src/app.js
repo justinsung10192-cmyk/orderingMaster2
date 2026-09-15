@@ -2187,8 +2187,11 @@ function verifyResultHtml(result) {
       <p class="mb-2 mt-4 text-sm font-bold">待結帳訂單</p>
       ${result.unpaidOrders.map((order) => `
         <div class="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-          <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
-          <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
+          <div class="ml-2 flex shrink-0 items-center gap-2">
+            <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
+            <button data-action="pay-order" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-stamp ring-1 ring-stamp/20">繳費</button>
+          </div>
         </div>`).join('')}
       <button data-action="settle-all" data-user="${student.id}" class="w-full rounded-xl bg-stamp py-3 text-sm font-bold text-white">現金結清全部（$${money(result.totalDebt)}）</button>` : ''}
 

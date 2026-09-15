@@ -2,7 +2,7 @@
 -- 全面審查修正（v3.2.x）：帳務／欠費／備份相關
 --   1. fn_topup：只抵「已到期（order_date <= 今天）」且未刪除的訂單，未來未到期不抵。
 --   2. fn_settle_cash：排除已刪除（is_deleted）訂單，避免誤結幽靈訂單。
---   3. 清理歷史幽靈訂單：把「已取消場次」中未標記刪除的訂單一併標記刪除。
+--   3. 還原被誤刪的未繳訂單（還原為未刪除，讓管理員仍能看到未繳款）。
 -- 在 Supabase SQL Editor 執行一次即可（冪等）。
 -- ============================================================================
 
@@ -122,8 +122,12 @@ begin
 end;
 $$;
 
--- 3. 清理歷史幽靈訂單：已取消場次中未標記刪除的訂單一併標記刪除------------------
+-- 3. 還原被誤刪的未繳訂單：已刪除場次中仍有現金欠款的訂單還原為未刪除------------------
+-- （註：先前版本會把這類訂單一併標記刪除，導致「未繳費的被消掉」；
+--   本段改為還原，讓管理員仍能看到並收帳，可自行決定是否清理）
 update orders o
-set is_deleted = true, updated_at = now()
+set is_deleted = false, updated_at = now()
 from sessions s
-where s.id = o.session_id and s.is_deleted = true and coalesce(o.is_deleted, false) = false;
+where s.id = o.session_id and s.is_deleted = true
+  and o.is_deleted = true
+  and (o.total_price - coalesce(o.prior_paid, 0)) > 0;

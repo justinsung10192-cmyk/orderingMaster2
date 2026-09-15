@@ -1,5 +1,5 @@
 // 動作：錢包歷史、管理員儲值、現金結清、餘額手動調整
-import { appError, sid, num, round2, todayString } from '../_lib/util.js';
+import { appError, sid, num, round2 } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, callRpc, listStoresForClass } from '../_lib/db.js';
 import { publicUser, outstandingOf, itemNameOf } from '../_lib/serialize.js';
 
@@ -30,11 +30,7 @@ export const actions = {
     const sessionById = new Map(sessions.map((session) => [String(session.id), session]));
     const stores = await listStoresForClass(ctx.classId);
     const storeById = new Map(stores.map((store) => [String(store.id), store]));
-
-    // 只統計「已到期」（order_date <= 今天）的現金欠費，未來未到期的訂單不列入
-    const today = todayString();
-    const dueOrders = activeOrders.filter((order) => (sessionById.get(String(order.session_id))?.order_date || '') <= today);
-    const cashUnpaid = round2(dueOrders.reduce((sum, order) => sum + outstandingOf(order), 0));
+    const cashUnpaid = round2(activeOrders.reduce((sum, order) => sum + outstandingOf(order), 0));
 
     const recentOrders = activeOrders
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))

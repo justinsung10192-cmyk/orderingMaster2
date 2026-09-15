@@ -171,13 +171,7 @@ export const actions = {
       .eq('is_deleted', false)
       .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
     if (error) throw appError('DB_ERROR', error.message);
-    const unpaidAll = unpaidRows || [];
-    // 只統計「已到期」（order_date <= 今天）的訂單，未來未到期不列入欠費
-    const today = todayString();
-    const unpaidSessionIds = [...new Set(unpaidAll.map((o) => o.session_id))];
-    const unpaidSessions = unpaidSessionIds.length ? await listRowsIn('sessions', 'id', unpaidSessionIds, { classId: ctx.classId }) : [];
-    const dueSessionIds = new Set(unpaidSessions.filter((s) => s.order_date <= today).map((s) => String(s.id)));
-    const activeOrders = unpaidAll.filter((o) => dueSessionIds.has(String(o.session_id)));
+    const activeOrders = unpaidRows || [];
 
     // 未繳總整理：所有仍有現金欠款的同學（不限日期），依座號排序
     const debtorUserIds = [...new Set(activeOrders.map((order) => order.user_id).filter((id) => id != null))];
@@ -367,13 +361,7 @@ export const actions = {
       .eq('is_deleted', false)
       .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
     if (error) throw appError('DB_ERROR', error.message);
-    const unpaidAll = (unpaidRows || []).filter((order) => outstandingOf(order) > 0);
-    // 只列「已到期」（order_date <= 今天）的訂單，避免誤催未來未到期訂單
-    const today = todayString();
-    const unpaidSessionIds = [...new Set(unpaidAll.map((o) => o.session_id))];
-    const unpaidSessions = unpaidSessionIds.length ? await listRowsIn('sessions', 'id', unpaidSessionIds, { classId: ctx.classId }) : [];
-    const dueSessionIds = new Set(unpaidSessions.filter((s) => s.order_date <= today).map((s) => String(s.id)));
-    const orders = unpaidAll.filter((o) => dueSessionIds.has(String(o.session_id)));
+    const orders = (unpaidRows || []).filter((order) => outstandingOf(order) > 0);
     const userIds = [...new Set(orders.map((order) => order.user_id).filter((id) => id != null))];
     const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId }) : [];
     const userById = new Map(users.map((user) => [String(user.id), user]));
