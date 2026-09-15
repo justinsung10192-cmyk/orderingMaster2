@@ -45,6 +45,6 @@ body.is-busy::before { content: ''; position: fixed; left: 50%; top: 50%; width:
 #scroll-drag-thumb { position: absolute; top: 0; left: 0; width: 8px; height: 48px; border-radius: 9999px; background: rgba(23, 59, 98, .26); cursor: grab; touch-action: none; transition: background .15s; }
 #scroll-drag-thumb:hover, #scroll-drag-thumb:active { background: rgba(23, 59, 98, .55); }
 
-/* 載入進度條（不確定尺寸時的真實進度動畫） */
-.boot-progress-indeterminate { width: 100%; transform-origin: left center; animation: boot-indeterminate 1.3s ease-in-out infinite; }
-@keyframes boot-indeterminate { 0% { transform: scaleX(0.05); } 50% { transform: scaleX(0.75); } 100% { transform: scaleX(0.05); } }
+/* 載入進度條：不確定進度時的流光動畫（不影響真實寬度） */
+#boot-shimmer { background: linear-gradient(90deg, transparent, rgba(246,160,77,.4), transparent); transform: translateX(-100%); animation: boot-shimmer 1.1s ease-in-out infinite; }
+@keyframes boot-shimmer { 100% { transform: translateX(100%); } }

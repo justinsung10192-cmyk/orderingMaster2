@@ -57,7 +57,10 @@ async function api(action, data = {}, onProgress) {
   // 若傳入 onProgress，則以串流讀取回應，回報「真實」下載進度（依 Content-Length）
   if (typeof onProgress === 'function' && res.body && typeof ReadableStream !== 'undefined') {
     const reader = res.body.getReader();
-    const total = Number(res.headers.get('Content-Length') || 0);
+    // 若回應被 gzip/br 壓縮，Content-Length 為「壓縮後」大小，與解壓後位元組不符；
+    // 僅在未壓縮時才用真實百分比，否則保持不確定進度直到完成。
+    const encoding = (res.headers.get('Content-Encoding') || '').toLowerCase();
+    const total = encoding ? 0 : Number(res.headers.get('Content-Length') || 0);
     const parts = [];
     let size = 0;
     while (true) {
@@ -104,29 +107,32 @@ function renderLoader() {
         <img src="/icons/loading.gif" alt="載入中" class="h-44 w-auto object-contain" />
         <p class="mt-3 font-serif text-lg font-black tracking-wide text-ledger">訂餐通</p>
         <p class="mt-1 text-xs text-slate-400">正在為你準備午餐手帳…</p>
-        <div class="mt-5 h-2 w-full overflow-hidden rounded-full bg-mist">
-          <div id="boot-progress" class="boot-progress-indeterminate h-full rounded-full bg-gradient-to-r from-apricot to-stamp"></div>
+        <div class="relative mt-5 h-2 w-full overflow-hidden rounded-full bg-mist">
+          <div id="boot-shimmer" class="absolute inset-0"></div>
+          <div id="boot-progress" class="relative h-full w-0 rounded-full bg-gradient-to-r from-apricot to-stamp transition-[width] duration-300 ease-out"></div>
         </div>
         <p id="boot-percent" class="mt-1.5 text-xs font-bold tabular-nums text-ledger">連線中…</p>
       </div>
     </div>`;
 }
 
-// 載入進度：以「真實」下載位元組回報（有 Content-Length 時顯示百分比）
+// 載入進度：以「真實」下載位元組回報（有 Content-Length 且未壓縮時顯示百分比）
 function updateBootProgress(pct) {
   const bar = document.getElementById('boot-progress');
   const pctEl = document.getElementById('boot-percent');
+  const shimmer = document.getElementById('boot-shimmer');
+  if (shimmer) shimmer.style.display = 'none';
   if (!bar) return;
-  bar.classList.remove('boot-progress-indeterminate');
-  bar.style.transition = 'width .15s ease-out';
-  bar.style.width = `${pct}%`;
+  bar.style.width = `${Math.min(100, pct)}%`;
   if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
 }
 
 function finishBootProgress() {
   const bar = document.getElementById('boot-progress');
   const pct = document.getElementById('boot-percent');
-  if (bar) { bar.classList.remove('boot-progress-indeterminate'); bar.style.width = '100%'; }
+  const shimmer = document.getElementById('boot-shimmer');
+  if (shimmer) shimmer.style.display = 'none';
+  if (bar) bar.style.width = '100%';
   if (pct) pct.textContent = '100%';
 }
 
