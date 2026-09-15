@@ -129,6 +129,21 @@ end;
 $$;
 
 -- C. 統一版 fn_settle_order（請客場次 + 儲值金 + 現金保留 + 防並發）--------------
+-- 先移除所有舊版多載，避免同名多載造成「Could not choose the best candidate function」
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.proname = 'fn_settle_order' and n.nspname = 'public'
+  loop
+    execute 'drop function public.fn_settle_order(' || pg_get_function_identity_arguments(r.oid) || ') cascade';
+  end loop;
+end;
+$$;
+
 create or replace function public.fn_settle_order(
   p_class_id text,
   p_user_id bigint,
@@ -273,28 +288,46 @@ begin
 end;
 $$;
 
--- D. 資料補退：把「已取消場次」中被漏退的儲值金補回用戶餘額（冪等）---------------
+-- D. 資料補退：把「已取消場次」中的儲值金補回（同時還原錯誤扣款；冪等）------------
 do $$
 declare
   v_order record;
   v_net numeric;
+  v_wrong numeric;
   v_refund numeric;
   v_count int := 0;
 begin
   for v_order in
-    select o.id, o.user_id, o.class_id, coalesce(o.wallet_paid, 0) as wallet_paid
+    select o.id, o.user_id, o.class_id, coalesce(o.wallet_paid, 0) as wallet_paid,
+           coalesce(o.total_price, 0) as total_price, coalesce(o.prior_paid, 0) as prior_paid,
+           o.payment_status
     from orders o
     join sessions s on s.id = o.session_id
     where s.is_deleted = true
-      and coalesce(o.wallet_paid, 0) > 0
   loop
+    -- 該單已記錄的「場次取消退款」淨額（正確退費為正，錯誤扣款為負）
     select coalesce(sum(t.amount), 0) into v_net
     from transactions t
     where t.order_id = v_order.id
       and t.kind = 'Refund'
       and t.note in ('場次取消退款', '場次取消退款（補退）');
 
-    v_refund := v_order.wallet_paid - coalesce(v_net, 0);
+    -- 1) 還原錯誤扣款（淨額為負 → 把被扣的金額加回）
+    if v_net < 0 then
+      v_wrong := -v_net;
+      update users set wallet_balance = wallet_balance + v_wrong, updated_at = now()
+      where id = v_order.user_id;
+      insert into transactions (class_id, user_id, order_id, amount, kind, note)
+      values (v_order.class_id, v_order.user_id, v_order.id, v_wrong, 'Refund', '場次取消退款（補退）');
+      v_net := v_net + v_wrong;
+    end if;
+
+    -- 2) 補退應退的儲值金（舊資料若 wallet_paid 未追蹤，用 PaidWallet 的 prior_paid 推估）
+    v_refund := v_order.wallet_paid;
+    if v_refund = 0 and v_order.payment_status = 'PaidWallet' then
+      v_refund := v_order.prior_paid;
+    end if;
+    v_refund := v_refund - coalesce(v_net, 0);
     if v_refund > 0 then
       update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
       where id = v_order.user_id;
@@ -304,13 +337,27 @@ begin
     end if;
   end loop;
 
-  raise notice '已補退 % 筆訂單的儲值金', v_count;
+  raise notice '已補退／修正 % 筆訂單', v_count;
 end;
 $$;
 
 -- E. 診斷（選用）：檢視仍有疑慮的用戶餘額與取消場次退款紀錄 ----------------------
 -- 若執行完上面的補退後，仍有同學餘額異常，可手動用「設定 → 儲值」調整。
+--
 -- 查看所有取消場次退款交易：
 --   select u.seat_no, u.student_name, t.amount, t.note, t.created_at
 --   from transactions t join users u on u.id = t.user_id
 --   where t.note like '場次取消退款%' order by t.created_at desc;
+--
+-- 查看「9/15 津川涼麵」場次每筆訂單的退款狀態（確認誰退了、誰漏退）：
+--   select s.id as session_id, s.is_deleted as session_deleted, st.name as store,
+--          o.id as order_id, u.seat_no, u.student_name,
+--          o.total_price, o.wallet_paid, o.prior_paid, o.payment_status,
+--          coalesce((select sum(t.amount) from transactions t
+--                    where t.order_id = o.id and t.kind = 'Refund' and t.note like '場次取消退款%'), 0) as refunded_net
+--   from sessions s
+--   join stores st on st.id = s.store_id
+--   join orders o on o.session_id = s.id
+--   join users u on u.id = o.user_id
+--   where st.name like '%津川涼麵%' and s.order_date = '2026-09-15'
+--   order by o.id;

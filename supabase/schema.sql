@@ -937,6 +937,21 @@ on conflict do nothing;
 -- ============================================================================
 --  取消場次／刪單退款修正 + 統一版金流函式（與 migration_fix_cancel_refund.sql 一致）
 -- ============================================================================
+
+-- 移除所有舊版 fn_settle_order 多載（避免同名多載造成「Could not choose the best candidate function」）
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where p.proname = 'fn_settle_order' and n.nspname = 'public'
+  loop
+    execute 'drop function public.fn_settle_order(' || pg_get_function_identity_arguments(r.oid) || ') cascade';
+  end loop;
+end;
+$$;
 create or replace function public.fn_delete_session_and_refund(
   p_class_id text,
   p_session_id bigint
