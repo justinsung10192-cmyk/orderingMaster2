@@ -20,7 +20,7 @@ declare
   v_order record;
   v_outstanding numeric;
   v_applied numeric := 0;
-  v_today text := to_char((now() + interval '8 hours')::date, 'YYYY-MM-DD');
+  v_today date := (now() + interval '8 hours')::date;
 begin
   select wallet_balance into v_balance
   from users where id = p_user_id and class_id = p_class_id
