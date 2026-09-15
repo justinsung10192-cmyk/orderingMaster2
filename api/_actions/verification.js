@@ -83,8 +83,12 @@ export const actions = {
     }
     if (new Date(payload.exp).getTime() < Date.now()) throw appError('EXPIRED', 'QR Code 已失效，請學生重新產生。');
 
-    const record = await findOne('verification_records', { payload: JSON.stringify(payload) }, ctx.classId);
-    if (!record || record.status !== 'Pending') throw appError('EXPIRED', '此憑證已使用或已失效。');
+    // 用 pin 雜湊比對（不依賴 payload JSON 的 key 順序，避免誤判「已使用」）
+    const pin = String(payload.pin || '').trim();
+    if (!pin) throw appError('INVALID_QR', 'QR Code 資料不完整。');
+    const record = await findOne('verification_records', { class_id: ctx.classId, pin_hash: sha256Hex(pin), status: 'Pending' });
+    if (!record) throw appError('EXPIRED', '此憑證已使用或已失效。');
+    if (String(record.user_id) !== String(payload.uid)) throw appError('INVALID_QR', 'QR Code 資料不一致。');
     if (new Date(record.expires_at).getTime() < Date.now()) throw appError('EXPIRED', 'QR Code 已過期，請學生重新產生。');
 
     await updateRows('verification_records', { id: record.id }, { status: 'Resolved', resolved_at: new Date().toISOString() });

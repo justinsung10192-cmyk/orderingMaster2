@@ -94,7 +94,7 @@ export const actions = {
     const event = await findOne('calendar_events', { id: Number(data.id) }, ctx.classId);
     if (!event) throw appError('NOT_FOUND', '找不到此事件。');
     const isAdmin = ctx.user.role === 'Admin';
-    const isOwner = String(event.user_id) === String(ctx.user.id);
+    const isOwner = String(event.user_id) === String(ctx.user.id) && ctx.user.role !== 'Teacher';
     if (!isAdmin && !isOwner) throw appError('FORBIDDEN', '只能修改自己新增的事件。');
     const payload = validatePayload(data);
     await updateRows('calendar_events', { id: event.id }, {
@@ -113,7 +113,7 @@ export const actions = {
     const event = await findOne('calendar_events', { id: Number(data.id) }, ctx.classId);
     if (!event) throw appError('NOT_FOUND', '找不到此事件。');
     const isAdmin = ctx.user.role === 'Admin';
-    const isOwner = String(event.user_id) === String(ctx.user.id);
+    const isOwner = String(event.user_id) === String(ctx.user.id) && ctx.user.role !== 'Teacher';
     if (!isAdmin && !isOwner) throw appError('FORBIDDEN', '只能刪除自己新增的事件。');
     await deleteRows('calendar_events', { id: event.id });
     await logCalendar(ctx.classId, event.id, ctx.user.id, userLabel(ctx.user), 'delete', event.title);

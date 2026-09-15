@@ -977,25 +977,26 @@ begin
 
   update sessions set is_deleted = true, closed_at = now() where id = p_session_id;
 
-  -- 逐筆訂單：只退「儲值金（錢包）」已付金額，未付／現金者一律不動（絕不扣款）
+  -- 逐筆訂單：全部標記刪除；只退「儲值金（錢包）」已付金額，未付／現金者一律不動（絕不扣款）
   for v_order in
     select * from orders
     where session_id = p_session_id
       and coalesce(is_deleted, false) = false
-      and coalesce(wallet_paid, 0) > 0
     order by id
     for update
   loop
-    -- 冪等防護：已退過（場次取消退款）就不再退
-    select count(*) into v_already from transactions
-    where order_id = v_order.id and kind = 'Refund' and note in ('場次取消退款', '場次取消退款（補退）');
-    if v_already = 0 then
-      v_refund := coalesce(v_order.wallet_paid, 0);
-      update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
-      where id = v_order.user_id and class_id = p_class_id;
-      insert into transactions (class_id, user_id, order_id, amount, kind, note)
-      values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
-      v_refunded_total := v_refunded_total + v_refund;
+    v_refund := coalesce(v_order.wallet_paid, 0);
+    if v_refund > 0 then
+      -- 冪等防護：已退過（場次取消退款）就不再退
+      select count(*) into v_already from transactions
+      where order_id = v_order.id and kind = 'Refund' and note in ('場次取消退款', '場次取消退款（補退）');
+      if v_already = 0 then
+        update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
+        where id = v_order.user_id and class_id = p_class_id;
+        insert into transactions (class_id, user_id, order_id, amount, kind, note)
+        values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
+        v_refunded_total := v_refunded_total + v_refund;
+      end if;
     end if;
     update orders set is_deleted = true, updated_at = now() where id = v_order.id;
     v_refunded_count := v_refunded_count + 1;
@@ -1197,5 +1198,123 @@ begin
   end if;
 
   return jsonb_build_object('order_id', v_order_id, 'wallet_balance', v_balance, 'payment_status', v_status);
+end;
+$$;
+
+
+-- ============================================================================
+-- 帳務修正（與 migration_audit_fixes.sql 一致）：fn_topup 只抵已到期、fn_settle_cash 排除已刪除
+-- ============================================================================
+create or replace function public.fn_topup(
+  p_class_id text,
+  p_user_id bigint,
+  p_amount numeric
+) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_balance numeric;
+  v_remaining numeric := p_amount;
+  v_order record;
+  v_outstanding numeric;
+  v_applied numeric := 0;
+  v_today text := to_char((now() + interval '8 hours')::date, 'YYYY-MM-DD');
+begin
+  select wallet_balance into v_balance
+  from users where id = p_user_id and class_id = p_class_id
+  for update;
+  if v_balance is null then
+    raise exception 'USER_NOT_FOUND';
+  end if;
+
+  -- 只抵「已到期（order_date <= 今天）」且未刪除的訂單，未來未到期不抵
+  for v_order in
+    select o.id, o.total_price, o.prior_paid
+    from orders o
+    join sessions s on s.id = o.session_id
+    where o.class_id = p_class_id and o.user_id = p_user_id
+      and coalesce(o.is_deleted, false) = false
+      and o.payment_status in ('UnpaidCash', 'PartiallyPaid')
+      and s.order_date <= v_today
+    order by o.created_at
+    for update of o
+  loop
+    if v_remaining <= 0 then exit; end if;
+    v_outstanding := v_order.total_price - coalesce(v_order.prior_paid, 0);
+    if v_outstanding > 0 then
+      if v_remaining >= v_outstanding then
+        update orders set prior_paid = total_price, payment_status = 'PaidCash', updated_at = now()
+        where id = v_order.id;
+        insert into transactions (class_id, user_id, order_id, amount, kind, note)
+        values (p_class_id, p_user_id, v_order.id, -v_outstanding, 'Cash', '儲值抵欠款');
+        v_remaining := v_remaining - v_outstanding;
+        v_applied := v_applied + v_outstanding;
+      else
+        update orders set prior_paid = prior_paid + v_remaining, payment_status = 'PartiallyPaid', updated_at = now()
+        where id = v_order.id;
+        insert into transactions (class_id, user_id, order_id, amount, kind, note)
+        values (p_class_id, p_user_id, v_order.id, -v_remaining, 'Cash', '儲值抵欠款');
+        v_applied := v_applied + v_remaining;
+        v_remaining := 0;
+      end if;
+    end if;
+  end loop;
+
+  if v_remaining > 0 then
+    v_balance := v_balance + v_remaining;
+    update users set wallet_balance = v_balance, updated_at = now()
+    where id = p_user_id;
+  end if;
+
+  insert into transactions (class_id, user_id, order_id, amount, kind, note)
+  values (p_class_id, p_user_id, null, p_amount, 'TopUp', '管理員儲值');
+
+  return jsonb_build_object(
+    'wallet_balance', v_balance,
+    'applied_to_debt', v_applied,
+    'remaining_debt', (select coalesce(sum(o.total_price - coalesce(o.prior_paid, 0)), 0) from orders o
+                        join sessions s on s.id = o.session_id
+                        where o.class_id = p_class_id and o.user_id = p_user_id
+                          and coalesce(o.is_deleted, false) = false
+                          and o.payment_status in ('UnpaidCash', 'PartiallyPaid')
+                          and s.order_date <= v_today)
+  );
+end;
+$$;
+
+create or replace function public.fn_settle_cash(
+  p_class_id text,
+  p_user_id bigint,
+  p_order_ids bigint[]
+) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_order_id bigint;
+  v_order record;
+  v_outstanding numeric;
+  v_total_settled numeric := 0;
+begin
+  perform 1 from users
+  where id = p_user_id and class_id = p_class_id
+  for update;
+
+  foreach v_order_id in array p_order_ids loop
+    select * into v_order from orders
+    where id = v_order_id and user_id = p_user_id and class_id = p_class_id
+      and coalesce(is_deleted, false) = false;
+    if v_order.id is not null then
+      v_outstanding := v_order.total_price - coalesce(v_order.prior_paid, 0);
+      if v_outstanding > 0 then
+        update orders set prior_paid = total_price, payment_status = 'PaidCash', updated_at = now()
+        where id = v_order.id;
+        insert into transactions (class_id, user_id, order_id, amount, kind, note)
+        values (p_class_id, p_user_id, v_order.id, -v_outstanding, 'Cash', '現金結清');
+        v_total_settled := v_total_settled + v_outstanding;
+      end if;
+    end if;
+  end loop;
+
+  return jsonb_build_object('settled', v_total_settled);
 end;
 $$;

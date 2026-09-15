@@ -92,11 +92,18 @@ function toast(message, type = 'info') {
   setTimeout(() => el.remove(), 2600);
 }
 
+let busyDepth = 0;
+
 async function busy(fn) {
-  if (state.busy) return;
-  state.busy = true;
+  busyDepth += 1;
   document.body.classList.add('is-busy');
-  try { await fn(); } finally { state.busy = false; document.body.classList.remove('is-busy'); }
+  try { await fn(); } finally {
+    busyDepth -= 1;
+    if (busyDepth <= 0) {
+      busyDepth = 0;
+      document.body.classList.remove('is-busy');
+    }
+  }
 }
 
 /* ============================ 啟動流程 ============================ */
@@ -1580,7 +1587,7 @@ async function openTreatSessionModal() {
         await api('adminSaveSession', {
           storeId: event.target.storeId.value,
           orderDate: event.target.orderDate.value,
-          cutoffTime: event.target.cutoffTime.value,
+          cutoffTime: new Date(event.target.cutoffTime.value).toISOString(),
           isTreat: true,
           treatCap: Number(event.target.treatCap.value),
         });
@@ -2912,7 +2919,7 @@ function renderCalendarEventsHtml(grouped) {
       <p class="mb-1.5 text-xs font-bold text-slate-500">${escapeHtml(monthDay(group.date))} ${escapeHtml(weekdayName(group.date))}</p>
       <div class="space-y-2">
         ${group.items.map((ev) => {
-          const canEdit = state.user.role === 'Admin' || String(ev.userId) === String(state.user.id);
+          const canEdit = state.user.role === 'Admin' || (state.user.role !== 'Teacher' && String(ev.userId) === String(state.user.id));
           return `
           <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
             <div class="flex items-start justify-between gap-2">

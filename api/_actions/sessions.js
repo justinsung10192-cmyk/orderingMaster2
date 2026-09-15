@@ -8,6 +8,14 @@ function formatTime(iso) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// 解析截止時間：若已含時區（Z 或 ±hh:mm）直接解析；否則視為台灣時間（datetime-local 無時區）
+function parseCutoffTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(raw)) return new Date(raw);
+  return new Date(`${raw}:00+08:00`);
+}
+
 export const actions = {
   // 建立或更新單一場次（草稿狀態，需「公布」後學生才能看到；支援請客場次）
   async adminSaveSession(data, ctx) {
@@ -15,8 +23,8 @@ export const actions = {
     if (!store) throw appError('NOT_FOUND', '店家不存在。');
     const orderDate = String(data.orderDate || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) throw appError('INVALID_INPUT', '請選擇訂餐日期。');
-    const cutoff = new Date(data.cutoffTime);
-    if (!Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
+    const cutoff = parseCutoffTime(data.cutoffTime);
+    if (!cutoff || !Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
 
     const isTreat = data.isTreat === true;
     let treatCap = 0;
@@ -57,8 +65,8 @@ export const actions = {
   async adminSetWeekCutoff(data, ctx) {
     const weekLabel = String(data.weekLabel || '');
     if (!/^\d{4}-W\d{1,2}$/.test(weekLabel)) throw appError('INVALID_INPUT', '週別格式不正確。');
-    const cutoff = new Date(data.cutoffTime);
-    if (!Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
+    const cutoff = parseCutoffTime(data.cutoffTime);
+    if (!cutoff || !Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
     const sessions = await listRows('sessions', { classId: ctx.classId, filters: { week_label: weekLabel, is_deleted: false } });
     for (const session of sessions) {
       await updateRows('sessions', { id: session.id }, { cutoff_time: cutoff.toISOString(), cutoff_reminder_sent: false });
@@ -69,8 +77,8 @@ export const actions = {
   async adminUpdateSessionCutoff(data, ctx) {
     const session = await findOne('sessions', { id: Number(data.sessionId) }, ctx.classId);
     if (!session) throw appError('NOT_FOUND', '場次不存在。');
-    const cutoff = new Date(data.cutoffTime);
-    if (!Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
+    const cutoff = parseCutoffTime(data.cutoffTime);
+    if (!cutoff || !Number.isFinite(cutoff.getTime())) throw appError('INVALID_INPUT', '請選擇截止時間。');
     await updateRows('sessions', { id: session.id }, { cutoff_time: cutoff.toISOString(), cutoff_reminder_sent: false });
     return { ok: true };
   },

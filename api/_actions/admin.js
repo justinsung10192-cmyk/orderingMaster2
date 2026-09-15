@@ -171,7 +171,13 @@ export const actions = {
       .eq('is_deleted', false)
       .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
     if (error) throw appError('DB_ERROR', error.message);
-    const activeOrders = unpaidRows || [];
+    const unpaidAll = unpaidRows || [];
+    // 只統計「已到期」（order_date <= 今天）的訂單，未來未到期不列入欠費
+    const today = todayString();
+    const unpaidSessionIds = [...new Set(unpaidAll.map((o) => o.session_id))];
+    const unpaidSessions = unpaidSessionIds.length ? await listRowsIn('sessions', 'id', unpaidSessionIds, { classId: ctx.classId }) : [];
+    const dueSessionIds = new Set(unpaidSessions.filter((s) => s.order_date <= today).map((s) => String(s.id)));
+    const activeOrders = unpaidAll.filter((o) => dueSessionIds.has(String(o.session_id)));
 
     // 未繳總整理：所有仍有現金欠款的同學（不限日期），依座號排序
     const debtorUserIds = [...new Set(activeOrders.map((order) => order.user_id).filter((id) => id != null))];
@@ -322,7 +328,7 @@ export const actions = {
     const userIds = [...new Set([...tx.map((t) => t.user_id), ...orders.map((o) => o.user_id)].filter(Boolean))];
     const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId: ctx.classId }) : [];
     const userById = new Map(users.map((u) => [String(u.id), u]));
-    const kindLabel = { TopUp: '儲值', Wallet: '訂餐扣款', Cash: '現金結帳', Refund: '退款', Manual: '手動調整' };
+    const kindLabel = { TopUp: '儲值', Wallet: '訂餐扣款', Cash: '現金結帳', Refund: '退款', Manual: '手動調整', Treat: '請客折抵' };
 
     const activities = [];
     for (const t of tx) {
@@ -361,7 +367,13 @@ export const actions = {
       .eq('is_deleted', false)
       .in('payment_status', ['UnpaidCash', 'PartiallyPaid']);
     if (error) throw appError('DB_ERROR', error.message);
-    const orders = (unpaidRows || []).filter((order) => outstandingOf(order) > 0);
+    const unpaidAll = (unpaidRows || []).filter((order) => outstandingOf(order) > 0);
+    // 只列「已到期」（order_date <= 今天）的訂單，避免誤催未來未到期訂單
+    const today = todayString();
+    const unpaidSessionIds = [...new Set(unpaidAll.map((o) => o.session_id))];
+    const unpaidSessions = unpaidSessionIds.length ? await listRowsIn('sessions', 'id', unpaidSessionIds, { classId: ctx.classId }) : [];
+    const dueSessionIds = new Set(unpaidSessions.filter((s) => s.order_date <= today).map((s) => String(s.id)));
+    const orders = unpaidAll.filter((o) => dueSessionIds.has(String(o.session_id)));
     const userIds = [...new Set(orders.map((order) => order.user_id).filter((id) => id != null))];
     const users = userIds.length ? await listRowsIn('users', 'id', userIds, { classId }) : [];
     const userById = new Map(users.map((user) => [String(user.id), user]));
@@ -396,9 +408,10 @@ export const actions = {
   async adminResetAllData(_data, ctx) {
     const classId = ctx.classId;
     // 依外鍵順序清除（先 orders 再 sessions，避免 sessions.store_id 被擋）
-    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores']) {
+    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments', 'push_subscriptions', 'auth_tokens']) {
       await deleteRows(table, { class_id: classId });
     }
+    await deleteRows('changelog', { class_id: '' });
     await updateRows('users', { class_id: classId }, { wallet_balance: 0, updated_at: new Date().toISOString() });
     return { ok: true };
   },
@@ -413,7 +426,7 @@ export const actions = {
 
   // 匯出完整資料備份（JSON）
   async adminExportBackup(_data, ctx) {
-    const tables = ['classes', 'users', 'stores', 'menu_items', 'sessions', 'orders', 'transactions', 'verification_records', 'votes', 'holidays', 'recurring_menu', 'app_settings'];
+    const tables = ['classes', 'users', 'stores', 'menu_items', 'sessions', 'orders', 'transactions', 'verification_records', 'votes', 'holidays', 'recurring_menu', 'app_settings', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments'];
     const dump = {};
     for (const table of tables) {
       const { data, error } = await supabase.from(table).select('*').eq('class_id', ctx.classId);
@@ -423,6 +436,9 @@ export const actions = {
     // 全域設定（class_id=''）一併備份
     const { data: globalSettings, error: gErr } = await supabase.from('app_settings').select('*').eq('class_id', '');
     if (!gErr) dump.app_settings = [...(dump.app_settings || []), ...(globalSettings || [])];
+    // 更新日誌為全域資料（class_id=''）
+    const { data: changelog, error: cErr } = await supabase.from('changelog').select('*').eq('class_id', '');
+    if (!cErr) dump.changelog = changelog || [];
     // 移除敏感欄位（密碼雜湊、salt、auth_version），避免備份檔外洩登入憑證
     if (Array.isArray(dump.users)) {
       dump.users = dump.users.map(({ password_hash, salt, auth_version, ...rest }) => rest);
@@ -463,7 +479,7 @@ export const actions = {
       if (!row.student_no) continue;
       const { error } = await supabase.from('users').update({
         wallet_balance: num(row.wallet_balance),
-        role: row.role === 'Admin' ? 'Admin' : 'Student',
+        role: row.role === 'Admin' ? 'Admin' : row.role === 'Teacher' ? 'Teacher' : 'Student',
         is_disabled: Boolean(row.is_disabled),
         duty_exempt: Boolean(row.duty_exempt),
         student_name: row.student_name || '',
@@ -473,9 +489,10 @@ export const actions = {
     }
 
     // 2) 清空可重建表
-    for (const t of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'duty_assignments']) {
+    for (const t of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'duty_assignments', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations']) {
       await deleteRows(t, { class_id: classId });
     }
+    await deleteRows('changelog', { class_id: '' });
 
     // 3) 店家（建立舊→新 id 對照）
     const storeIdMap = new Map();
@@ -506,6 +523,29 @@ export const actions = {
     // 7) 設定
     for (const row of tables.app_settings.filter((r) => r.class_id === classId || r.class_id === '')) {
       await supabase.from('app_settings').upsert({ class_id: row.class_id || '', key: row.key, value: row.value || '' }, { onConflict: 'class_id,key' });
+    }
+
+    // 8) 行事曆、欠費、請假、推薦、值日、更新日誌（v3.2 新功能資料）
+    for (const row of tables.calendar_events.filter((r) => r.class_id === classId)) {
+      await supabase.from('calendar_events').insert({ class_id: classId, user_id: row.user_id, title: row.title, description: row.description || '', category: row.category || '其他', event_date: row.event_date, created_at: row.created_at });
+    }
+    for (const row of tables.calendar_event_logs.filter((r) => r.class_id === classId)) {
+      await supabase.from('calendar_event_logs').insert({ class_id: classId, event_id: row.event_id, user_id: row.user_id, user_label: row.user_label || '', action: row.action, detail: row.detail || '', created_at: row.created_at });
+    }
+    for (const row of tables.custom_debts.filter((r) => r.class_id === classId)) {
+      await supabase.from('custom_debts').insert({ class_id: classId, creditor_id: row.creditor_id, debtor_id: row.debtor_id, amount: num(row.amount), note: row.note || '', status: row.status || 'Outstanding', created_at: row.created_at, settled_at: row.settled_at });
+    }
+    for (const row of tables.leave_requests.filter((r) => r.class_id === classId)) {
+      await supabase.from('leave_requests').insert({ class_id: classId, user_id: row.user_id, leave_date: row.leave_date, reason: row.reason || '', status: row.status || 'Pending', requested_at: row.requested_at, resolved_at: row.resolved_at, resolved_by: row.resolved_by });
+    }
+    for (const row of tables.menu_recommendations.filter((r) => r.class_id === classId)) {
+      await supabase.from('menu_recommendations').insert({ class_id: classId, user_id: row.user_id, store_name: row.store_name, note: row.note || '', created_at: row.created_at });
+    }
+    for (const row of tables.duty_assignments.filter((r) => r.class_id === classId)) {
+      await supabase.from('duty_assignments').insert({ class_id: classId, duty_date: row.duty_date, user_id: row.user_id });
+    }
+    for (const row of tables.changelog || []) {
+      await supabase.from('changelog').insert({ class_id: '', version: row.version, title: row.title, body: row.body, created_at: row.created_at });
     }
 
     return { ok: true, usersRestored, storesRestored: storeIdMap.size };

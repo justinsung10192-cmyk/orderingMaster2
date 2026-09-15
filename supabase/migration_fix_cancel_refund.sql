@@ -48,25 +48,26 @@ begin
 
   update sessions set is_deleted = true, closed_at = now() where id = p_session_id;
 
-  -- 逐筆訂單：只退「儲值金（錢包）」已付金額，未付／現金者一律不動（絕不扣款）
+  -- 逐筆訂單：全部標記刪除；只退「儲值金（錢包）」已付金額，未付／現金者一律不動（絕不扣款）
   for v_order in
     select * from orders
     where session_id = p_session_id
       and coalesce(is_deleted, false) = false
-      and coalesce(wallet_paid, 0) > 0
     order by id
     for update
   loop
-    -- 冪等防護：已退過（場次取消退款）就不再退
-    select count(*) into v_already from transactions
-    where order_id = v_order.id and kind = 'Refund' and note in ('場次取消退款', '場次取消退款（補退）');
-    if v_already = 0 then
-      v_refund := coalesce(v_order.wallet_paid, 0);
-      update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
-      where id = v_order.user_id and class_id = p_class_id;
-      insert into transactions (class_id, user_id, order_id, amount, kind, note)
-      values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
-      v_refunded_total := v_refunded_total + v_refund;
+    v_refund := coalesce(v_order.wallet_paid, 0);
+    if v_refund > 0 then
+      -- 冪等防護：已退過（場次取消退款）就不再退
+      select count(*) into v_already from transactions
+      where order_id = v_order.id and kind = 'Refund' and note in ('場次取消退款', '場次取消退款（補退）');
+      if v_already = 0 then
+        update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
+        where id = v_order.user_id and class_id = p_class_id;
+        insert into transactions (class_id, user_id, order_id, amount, kind, note)
+        values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
+        v_refunded_total := v_refunded_total + v_refund;
+      end if;
     end if;
     update orders set is_deleted = true, updated_at = now() where id = v_order.id;
     v_refunded_count := v_refunded_count + 1;
