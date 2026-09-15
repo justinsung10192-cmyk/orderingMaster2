@@ -10,7 +10,7 @@ export const supabase = createClient(supabaseUrl, serviceKey, {
 });
 
 export function throwDb(error, fallback = '資料庫操作失敗。') {
-  if (error?.message?.includes('INSUFFICIENT_BALANCE')) throw appError('INSUFFICIENT_BALANCE', '儲值餘額不足，無法完成此操作。');
+  if (error?.message?.includes('INSUFFICIENT_BALANCE')) throw appError('INSUFFICIENT_BALANCE', '餘額不足，無法完成此操作。');
   if (error?.message?.includes('PURE_MODE_NO_CASH')) throw appError('PURE_MODE_NO_CASH', '目前為純儲值模式，餘額不足無法訂餐。');
   if (error?.message?.includes('USER_NOT_FOUND')) throw appError('USER_NOT_FOUND', '找不到使用者。');
   if (error?.message?.includes('ORDER_NOT_FOUND')) throw appError('ORDER_NOT_FOUND', '找不到訂單。');

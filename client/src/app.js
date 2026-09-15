@@ -1400,6 +1400,7 @@ async function renderAdminUsers(content) {
                 <button data-action="toggle-user" data-user="${user.id}" data-disabled="${user.isDisabled}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.isDisabled ? 'text-stamp' : 'text-slate-500'}">${user.isDisabled ? '啟用' : '停用'}</button>
                 <button data-action="toggle-duty" data-user="${user.id}" data-duty="${user.dutyExempt}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold ${user.dutyExempt ? 'text-stamp' : 'text-slate-500'}">${user.dutyExempt ? '恢復值日' : '免值日'}</button>
                 <button data-action="topup" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-stamp">儲值</button>
+                <button data-action="adjust-balance" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">調整餘額</button>
                 <button data-action="reset-pw" data-user="${user.id}" class="rounded-lg bg-mist px-2.5 py-1.5 text-[11px] font-bold text-slate-500">重設密碼</button>
                 <button data-action="del-user" data-user="${user.id}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-600">刪除</button>
               </div>
@@ -2626,6 +2627,7 @@ async function handleAction(action, target) {
       break;
     }
     case 'topup': openTopupModal(target.getAttribute('data-user')); break;
+    case 'adjust-balance': openAdjustBalanceModal(target.getAttribute('data-user')); break;
     case 'pay-order': {
       const orderId = target.getAttribute('data-order');
       const userId = target.getAttribute('data-user');
@@ -3602,6 +3604,19 @@ function openTopupModal(userId) {
   promptModal('儲值', [{ name: 'amount', label: '儲值金額（元）', type: 'number' }], async (v) => {
     const r = await api('adminTopUp', { userId, amount: Number(v.amount) });
     toast(`儲值完成：抵欠款 $${money(r.appliedToDebt)}，餘額 ${fmtMoney(r.walletBalance)}，尚欠 $${money(r.remainingDebt)}。`, 'success');
+    await refreshAdmin();
+  });
+}
+
+function openAdjustBalanceModal(userId) {
+  promptModal('調整餘額（＋加值／－扣除）', [
+    { name: 'amount', label: '金額（正數＝加值，負數＝扣除）', type: 'number', placeholder: '例如 -50 表示扣除 50 元' },
+    { name: 'note', label: '備註（可選）', type: 'text', placeholder: '例如：代墊退款' },
+  ], async (v) => {
+    const amount = Number(v.amount);
+    if (!Number.isFinite(amount) || amount === 0) return toast('請輸入正確金額。', 'error');
+    const r = await api('adminManualBalance', { userId, amount, note: v.note });
+    toast(`已調整，目前餘額 ${fmtMoney(r.walletBalance)}。`, 'success');
     await refreshAdmin();
   });
 }
