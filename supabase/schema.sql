@@ -932,3 +932,255 @@ values
 ('', 'v3.1.0', '行事曆與通知優化', '新增班級行事曆（AI 辨識、歷史紀錄、過期收合）、全服通知、台灣時間顯示、補單修正。'),
 ('', 'v3.0.0', 'AI 菜單辨識與每日菜單', '智慧菜單辨識、每日菜單整合內訂、一鍵公布本週。')
 on conflict do nothing;
+
+
+-- ============================================================================
+--  取消場次／刪單退款修正 + 統一版金流函式（與 migration_fix_cancel_refund.sql 一致）
+-- ============================================================================
+create or replace function public.fn_delete_session_and_refund(
+  p_class_id text,
+  p_session_id bigint
+) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_session record;
+  v_order record;
+  v_refund numeric;
+  v_refunded_count int := 0;
+  v_refunded_total numeric := 0;
+  v_already int;
+begin
+  select * into v_session from sessions where id = p_session_id and class_id = p_class_id for update;
+  if v_session.id is null then
+    raise exception 'SESSION_NOT_FOUND';
+  end if;
+
+  if v_session.is_deleted then
+    return jsonb_build_object('ok', true, 'refunded_count', 0, 'refunded_total', 0);
+  end if;
+
+  update sessions set is_deleted = true, closed_at = now() where id = p_session_id;
+
+  -- 逐筆訂單：只退「儲值金（錢包）」已付金額，未付／現金者一律不動（絕不扣款）
+  for v_order in
+    select * from orders
+    where session_id = p_session_id
+      and coalesce(is_deleted, false) = false
+      and coalesce(wallet_paid, 0) > 0
+    order by id
+    for update
+  loop
+    -- 冪等防護：已退過（場次取消退款）就不再退
+    select count(*) into v_already from transactions
+    where order_id = v_order.id and kind = 'Refund' and note in ('場次取消退款', '場次取消退款（補退）');
+    if v_already = 0 then
+      v_refund := coalesce(v_order.wallet_paid, 0);
+      update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
+      where id = v_order.user_id and class_id = p_class_id;
+      insert into transactions (class_id, user_id, order_id, amount, kind, note)
+      values (p_class_id, v_order.user_id, v_order.id, v_refund, 'Refund', '場次取消退款');
+      v_refunded_total := v_refunded_total + v_refund;
+    end if;
+    update orders set is_deleted = true, updated_at = now() where id = v_order.id;
+    v_refunded_count := v_refunded_count + 1;
+  end loop;
+
+  -- 請客場次：釋放已用免費額度（歸零），統計才正確
+  if v_session.is_treat then
+    update sessions set treat_used = 0 where id = p_session_id;
+  end if;
+
+  return jsonb_build_object('ok', true, 'refunded_count', v_refunded_count, 'refunded_total', v_refunded_total);
+end;
+$$;
+
+create or replace function public.fn_refund_order(
+  p_class_id text,
+  p_user_id bigint,
+  p_order_id bigint
+) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_balance numeric;
+  v_order record;
+  v_refund numeric;
+begin
+  select wallet_balance into v_balance
+  from users where id = p_user_id and class_id = p_class_id
+  for update;
+  if v_balance is null then
+    raise exception 'USER_NOT_FOUND';
+  end if;
+
+  select * into v_order from orders
+  where id = p_order_id and user_id = p_user_id and class_id = p_class_id
+  for update;
+  if v_order.id is null then
+    raise exception 'ORDER_NOT_FOUND';
+  end if;
+
+  v_refund := coalesce(v_order.wallet_paid, 0);
+  if v_refund > 0 then
+    update users set wallet_balance = wallet_balance + v_refund, updated_at = now()
+    where id = p_user_id;
+    insert into transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, p_order_id, v_refund, 'Refund', '取消訂單退款');
+  end if;
+
+  -- 請客場次：釋放該單使用的免費額度
+  if coalesce(v_order.treat_covered, 0) > 0 then
+    update sessions set treat_used = greatest(0, treat_used - v_order.treat_covered)
+    where id = v_order.session_id;
+  end if;
+
+  delete from orders where id = p_order_id;
+
+  return jsonb_build_object('wallet_balance', v_balance + v_refund, 'refunded', v_refund);
+end;
+$$;
+
+create or replace function public.fn_settle_order(
+  p_class_id text,
+  p_user_id bigint,
+  p_session_id bigint,
+  p_total numeric,
+  p_wallet_paid numeric,
+  p_cash_outstanding numeric,
+  p_pure_mode boolean default false,
+  p_prior_paid numeric default 0,
+  p_order_id bigint default null,
+  p_items jsonb default '[]',
+  p_note text default '',
+  p_treat_covered numeric default 0
+) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_balance numeric;
+  v_status text;
+  v_order_id bigint;
+  v_wallet_paid numeric := 0;
+  v_old_prior_paid numeric := 0;
+  v_old_treat_covered numeric := 0;
+  v_cash_paid numeric := 0;
+  v_new_prior_paid numeric;
+  v_new_cash_outstanding numeric;
+  v_treat_covered numeric := 0;
+  v_is_treat boolean := false;
+  v_cap numeric := 0;
+  v_used numeric := 0;
+  v_remaining numeric;
+begin
+  select wallet_balance into v_balance
+  from users where id = p_user_id and class_id = p_class_id
+  for update;
+  if v_balance is null then
+    raise exception 'USER_NOT_FOUND';
+  end if;
+
+  -- 場次請客資訊（若尚未執行 v3.2 遷移，這些欄位不存在，此處用 try 語法防護）
+  begin
+    select coalesce(is_treat, false), coalesce(treat_cap, 0), coalesce(treat_used, 0)
+    into v_is_treat, v_cap, v_used
+    from sessions where id = p_session_id and class_id = p_class_id
+    for update;
+  exception when undefined_column then
+    v_is_treat := false; v_cap := 0; v_used := 0;
+  end;
+
+  -- 更新訂單：鎖定訂單列並讀取資料庫內的 wallet_paid/prior_paid/treat_covered
+  if p_order_id is not null then
+    select wallet_paid, coalesce(prior_paid, 0), coalesce(treat_covered, 0)
+    into v_wallet_paid, v_old_prior_paid, v_old_treat_covered
+    from orders
+    where id = p_order_id and user_id = p_user_id and class_id = p_class_id
+    for update;
+    if v_wallet_paid is null then
+      raise exception 'ORDER_NOT_FOUND';
+    end if;
+    -- 釋放舊請客額度
+    if v_old_treat_covered > 0 and v_is_treat then
+      update sessions set treat_used = greatest(0, treat_used - v_old_treat_covered) where id = p_session_id;
+      v_used := greatest(0, v_used - v_old_treat_covered);
+    end if;
+  end if;
+
+  -- 舊單已繳現金（先繳的現金不能因為改單而消失）
+  v_cash_paid := v_old_prior_paid - v_wallet_paid - v_old_treat_covered;
+  if v_cash_paid < 0 then v_cash_paid := 0; end if;
+
+  -- 請客場次：免費額度 = min(需求, 剩餘額度, 訂單總額)
+  if v_is_treat and v_cap > 0 then
+    v_remaining := greatest(0, v_cap - v_used);
+    v_treat_covered := least(coalesce(p_treat_covered, 0), v_remaining, p_total);
+    if v_treat_covered < 0 then v_treat_covered := 0; end if;
+    if v_treat_covered > 0 then
+      update sessions set treat_used = treat_used + v_treat_covered where id = p_session_id;
+    end if;
+  end if;
+
+  if p_pure_mode then
+    if p_cash_outstanding > 0 then
+      raise exception 'PURE_MODE_NO_CASH';
+    end if;
+    if v_balance + v_wallet_paid < p_wallet_paid then
+      raise exception 'INSUFFICIENT_BALANCE';
+    end if;
+  end if;
+
+  -- 退回舊單錢包已付，再重新扣款
+  v_balance := v_balance + v_wallet_paid;
+  if p_wallet_paid > 0 then
+    if v_balance < p_wallet_paid then
+      raise exception 'INSUFFICIENT_BALANCE';
+    end if;
+    v_balance := v_balance - p_wallet_paid;
+  end if;
+  update users set wallet_balance = v_balance, updated_at = now() where id = p_user_id;
+
+  v_new_prior_paid := p_wallet_paid + v_cash_paid + v_treat_covered;
+  if v_new_prior_paid > p_total then v_new_prior_paid := p_total; end if;
+  v_new_cash_outstanding := p_total - v_new_prior_paid;
+
+  if v_new_cash_outstanding <= 0 then
+    if v_cash_paid > 0 or v_treat_covered > 0 then v_status := 'PaidCash'; else v_status := 'PaidWallet'; end if;
+  elsif v_new_prior_paid > 0 then
+    v_status := 'PartiallyPaid';
+  else
+    v_status := 'UnpaidCash';
+  end if;
+
+  if p_order_id is not null then
+    update orders
+       set items = p_items, total_price = p_total, prior_paid = v_new_prior_paid, wallet_paid = p_wallet_paid,
+           payment_status = v_status, note = p_note, treat_covered = v_treat_covered, updated_at = now()
+     where id = p_order_id
+    returning id into v_order_id;
+  else
+    insert into orders (class_id, session_id, user_id, items, total_price, prior_paid, wallet_paid, payment_status, pickup_status, note, treat_covered)
+    values (p_class_id, p_session_id, p_user_id, p_items, p_total, v_new_prior_paid, p_wallet_paid, v_status, 'Pending', p_note, v_treat_covered)
+    returning id into v_order_id;
+  end if;
+
+  if v_wallet_paid > 0 then
+    insert into transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, v_order_id, v_wallet_paid, 'Refund', '訂單修改退款');
+  end if;
+  if p_wallet_paid > 0 then
+    insert into transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, v_order_id, -p_wallet_paid, 'Wallet', '訂餐扣款');
+  end if;
+  if v_treat_covered > 0 then
+    insert into transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, v_order_id, -v_treat_covered, 'Treat', '請客折抵');
+  end if;
+  if v_new_cash_outstanding > 0 then
+    insert into transactions (class_id, user_id, order_id, amount, kind, note)
+    values (p_class_id, p_user_id, v_order_id, v_new_cash_outstanding, 'Cash', '現金未繳');
+  end if;
+
+  return jsonb_build_object('order_id', v_order_id, 'wallet_balance', v_balance, 'payment_status', v_status);
+end;
+$$;

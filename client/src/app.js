@@ -48,12 +48,33 @@ const ICONS = { order: '⌑', vote: '♡', calendar: '▦', wallet: '¤', admin:
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0'; // 由 vite.config.ts 於建置時注入
 
 /* ============================ API ============================ */
-async function api(action, data = {}) {
+async function api(action, data = {}, onProgress) {
   const res = await fetch(window.LUNCH_CONFIG.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, data, token: state.token }),
   });
+  // 若傳入 onProgress，則以串流讀取回應，回報「真實」下載進度（依 Content-Length）
+  if (typeof onProgress === 'function' && res.body && typeof ReadableStream !== 'undefined') {
+    const reader = res.body.getReader();
+    const total = Number(res.headers.get('Content-Length') || 0);
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      size += value.length;
+      if (total > 0) onProgress(Math.min(100, Math.round((size / total) * 100)));
+    }
+    const buf = new Uint8Array(size);
+    let off = 0;
+    for (const part of parts) { buf.set(part, off); off += part.length; }
+    const json = JSON.parse(new TextDecoder().decode(buf));
+    onProgress(100);
+    if (!json.ok) throw new Error(json.error || '操作失敗，請稍後再試。');
+    return json.data;
+  }
   const json = await res.json();
   if (!json.ok) throw new Error(json.error || '操作失敗，請稍後再試。');
   return json.data;
@@ -76,8 +97,6 @@ async function busy(fn) {
 }
 
 /* ============================ 啟動流程 ============================ */
-let bootProgressTimer = null;
-
 function renderLoader() {
   app.innerHTML = `
     <div id="boot-loader" class="fixed inset-0 z-[100] grid place-items-center bg-paper">
@@ -86,38 +105,34 @@ function renderLoader() {
         <p class="mt-3 font-serif text-lg font-black tracking-wide text-ledger">訂餐通</p>
         <p class="mt-1 text-xs text-slate-400">正在為你準備午餐手帳…</p>
         <div class="mt-5 h-2 w-full overflow-hidden rounded-full bg-mist">
-          <div id="boot-progress" class="h-full w-0 rounded-full bg-gradient-to-r from-apricot to-stamp transition-[width] duration-200 ease-out"></div>
+          <div id="boot-progress" class="boot-progress-indeterminate h-full rounded-full bg-gradient-to-r from-apricot to-stamp"></div>
         </div>
-        <p id="boot-percent" class="mt-1.5 text-xs font-bold tabular-nums text-ledger">0%</p>
+        <p id="boot-percent" class="mt-1.5 text-xs font-bold tabular-nums text-ledger">連線中…</p>
       </div>
     </div>`;
 }
 
-// 載入進度條：先快後慢推進到 92%，待載入完成畫面切換即消失
-function startBootProgress() {
+// 載入進度：以「真實」下載位元組回報（有 Content-Length 時顯示百分比）
+function updateBootProgress(pct) {
   const bar = document.getElementById('boot-progress');
-  const pct = document.getElementById('boot-percent');
-  if (!bar || !pct) return;
-  let value = 0;
-  bootProgressTimer = setInterval(() => {
-    value = Math.min(92, value + Math.max(0.6, (92 - value) * 0.07));
-    bar.style.width = `${value}%`;
-    pct.textContent = `${Math.round(value)}%`;
-  }, 120);
+  const pctEl = document.getElementById('boot-percent');
+  if (!bar) return;
+  bar.classList.remove('boot-progress-indeterminate');
+  bar.style.transition = 'width .15s ease-out';
+  bar.style.width = `${pct}%`;
+  if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
 }
 
 function finishBootProgress() {
-  if (bootProgressTimer) { clearInterval(bootProgressTimer); bootProgressTimer = null; }
   const bar = document.getElementById('boot-progress');
   const pct = document.getElementById('boot-percent');
-  if (bar) bar.style.width = '100%';
+  if (bar) { bar.classList.remove('boot-progress-indeterminate'); bar.style.width = '100%'; }
   if (pct) pct.textContent = '100%';
 }
 
 async function bootstrap() {
   renderLoader();
   initScrollbar();
-  startBootProgress();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
@@ -126,7 +141,7 @@ async function bootstrap() {
   });
   if (state.token) {
     try {
-      state.boot = await api('getBootstrap');
+      state.boot = await api('getBootstrap', {}, updateBootProgress);
       state.user = state.boot.user;
       finishBootProgress();
       render();
@@ -2534,7 +2549,7 @@ async function handleAction(action, target) {
     }
     case 'add-session': openSessionEditor(target.getAttribute('data-date')); break;
     case 'edit-session': openSessionEditor(null, target.getAttribute('data-session')); break;
-    case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); await refreshAdmin(); }); break;
+    case 'del-session': openConfirm('刪除場次', '刪除後將自動退還已付款項，確定嗎？', async () => { const r = await api('adminDeleteSession', { sessionId: target.getAttribute('data-session') }); toast(`場次已刪除，退還儲值金 $${money(r.refundedTotal || 0)}。`, 'success'); await refreshAdmin(); }); break;
     case 'publish-week': openConfirm('公布本週菜單', '公布後學生即可開始訂餐，並會推播通知。', async () => { const r = await api('adminPublishWeek', { weekLabel: state.admin.scheduleWeek }); toast(`已公布 ${r.published} 個場次。`, 'success'); await refreshAdmin(); }); break;
     case 'week-cutoff': openWeekCutoffModal(); break;
     case 'add-recurring': {

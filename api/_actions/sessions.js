@@ -89,7 +89,7 @@ export const actions = {
       p_class_id: ctx.classId,
       p_session_id: session.id,
     });
-    return { ok: true, refundedCount: result.refunded_count };
+    return { ok: true, refundedCount: result.refunded_count, refundedTotal: num(result.refunded_total) };
   },
 
   // 一鍵公布某週所有場次，並推播「訂餐開始」
