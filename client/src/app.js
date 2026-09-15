@@ -850,7 +850,7 @@ async function loadWalletDetail() {
     const txsEl = $('#wallet-txs');
     const debtEl = $('#wallet-debt');
     if (!balanceEl || !ordersEl || !txsEl) return; // 畫面已切換，忽略本次結果
-    balanceEl.textContent = fmtMoney(data.walletBalance);
+    balanceEl.textContent = fmtMoney(data.user.walletBalance);
     if (debtEl) debtEl.textContent = data.cashUnpaid > 0 ? fmtMoney(data.cashUnpaid) : '無';
     ordersEl.innerHTML = data.orders.length ? data.orders.map((order) => `
       <div class="rounded-xl bg-white p-3.5 shadow-sm ring-1 ring-ledger/5">
