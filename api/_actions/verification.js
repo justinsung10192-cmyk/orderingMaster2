@@ -35,6 +35,7 @@ async function resolveContext(classId, userId) {
       orderDate: session?.order_date || '',
       storeName: store?.name || '未指定店家',
       itemName: itemNameOf(order),
+      note: order.note || '',
       totalPrice: num(order.total_price),
       paymentStatus: order.payment_status,
       pickupStatus: order.pickup_status,

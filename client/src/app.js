@@ -1057,6 +1057,7 @@ async function renderAdminDashboard(content) {
                 <div class="min-w-0">
                   <p class="text-sm font-bold text-ledger">${escapeHtml(order.seatNo)} ${escapeHtml(order.studentName)}</p>
                   <p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}${order.selectedOptions.length ? '（' + escapeHtml(order.selectedOptions.map((o) => o.name).join('、')) + '）' : ''}</p>
+                  ${order.note ? `<p class="mt-0.5 text-xs font-bold text-stamp">備註：${escapeHtml(order.note)}</p>` : ''}
                 </div>
                 <div class="flex items-center gap-2">
                   <div class="text-right">
@@ -2145,7 +2146,7 @@ function verifyResultHtml(result) {
   if (result.intent === 'pickup') {
     const rows = result.todayOrders.length ? result.todayOrders.map((order) => `
         <div class="mt-2 flex items-center justify-between rounded-xl bg-mist/60 px-3 py-2.5">
-          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p></div>
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p>${order.note ? `<p class="mt-0.5 text-xs font-bold text-stamp">備註：${escapeHtml(order.note)}</p>` : ''}</div>
           <button data-action="confirm-pickup" data-order="${order.orderId}" data-user="${student.id}" class="ml-2 shrink-0 rounded-lg ${order.pickupStatus === 'PickedUp' ? 'bg-slate-200 text-slate-400' : 'bg-stamp text-white'} px-3 py-2 text-xs font-bold">${order.pickupStatus === 'PickedUp' ? '已取餐' : '確定領取'}</button>
         </div>`).join('') : '<p class="mt-3 rounded-xl bg-mist/60 px-3 py-8 text-center text-sm text-slate-400">今天沒有訂單。</p>';
     return `${head('取餐 · 餘額 ' + fmtMoney(result.walletBalance))}
@@ -2158,7 +2159,7 @@ function verifyResultHtml(result) {
   if (result.intent === 'pay') {
     const rows = result.unpaidOrders.length ? result.unpaidOrders.map((order) => `
         <div class="mt-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p>${order.note ? `<p class="mt-0.5 text-xs font-bold text-stamp">備註：${escapeHtml(order.note)}</p>` : ''}</div>
           <div class="ml-2 flex shrink-0 items-center gap-2">
             <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
             <button data-action="pay-order" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-stamp ring-1 ring-stamp/20">繳費</button>
@@ -2180,7 +2181,7 @@ function verifyResultHtml(result) {
       <p class="mb-2 mt-4 text-sm font-bold">今日訂單（取餐標記）</p>
       ${result.todayOrders.map((order) => `
         <div class="mb-2 flex items-center justify-between rounded-xl bg-mist/60 px-3 py-2.5">
-          <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p></div>
+          <div><p class="text-sm font-bold text-ledger">${escapeHtml(order.storeName)}</p><p class="text-xs text-slate-500">${escapeHtml(order.itemName)} · $${money(order.totalPrice)}</p>${order.note ? `<p class="mt-0.5 text-xs font-bold text-stamp">備註：${escapeHtml(order.note)}</p>` : ''}</div>
           <button data-action="confirm-pickup" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg ${order.pickupStatus === 'PickedUp' ? 'bg-slate-200 text-slate-400' : 'bg-stamp text-white'} px-3 py-2 text-xs font-bold">${order.pickupStatus === 'PickedUp' ? '已取餐' : '標記取餐'}</button>
         </div>`).join('')}` : ''}
 
@@ -2188,7 +2189,7 @@ function verifyResultHtml(result) {
       <p class="mb-2 mt-4 text-sm font-bold">待結帳訂單</p>
       ${result.unpaidOrders.map((order) => `
         <div class="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
-          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p></div>
+          <div class="min-w-0"><p class="text-sm font-bold text-ledger">${escapeHtml(order.orderDate)} ${escapeHtml(order.storeName)}</p><p class="truncate text-xs text-slate-500">${escapeHtml(order.itemName)}</p>${order.note ? `<p class="mt-0.5 text-xs font-bold text-stamp">備註：${escapeHtml(order.note)}</p>` : ''}</div>
           <div class="ml-2 flex shrink-0 items-center gap-2">
             <span class="font-bold tabular-nums text-apricot">$${money(order.outstanding)}</span>
             <button data-action="pay-order" data-order="${order.orderId}" data-user="${student.id}" class="rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-stamp ring-1 ring-stamp/20">繳費</button>
