@@ -1,7 +1,7 @@
 // 動作：產生臨時 QR + 4 位 PIN、管理者掃碼/輸入 PIN 核銷、取餐標記
 import { appError, sid, num, round2, randomDigits, sha256Hex, todayString } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, updateRows } from '../_lib/db.js';
-import { outstandingOf, itemNameOf } from '../_lib/serialize.js';
+import { outstandingOf, itemNameOf, selectedOptionsOf } from '../_lib/serialize.js';
 import { sendPushToUser } from '../_lib/push.js';
 
 const VERIFY_MINUTES = 5;
@@ -35,6 +35,7 @@ async function resolveContext(classId, userId) {
       orderDate: session?.order_date || '',
       storeName: store?.name || '未指定店家',
       itemName: itemNameOf(order),
+      selectedOptions: selectedOptionsOf(order),
       note: order.note || '',
       totalPrice: num(order.total_price),
       paymentStatus: order.payment_status,
