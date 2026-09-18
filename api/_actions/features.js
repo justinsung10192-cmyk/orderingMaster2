@@ -39,6 +39,39 @@ async function resolveUserBySeat(classId, raw) {
   throw appError('NOT_FOUND', '找不到此座號／學號的同學。');
 }
 
+// 自動擷取 GitHub 的 commit 訊息，作為「版本更新日誌」的自動來源
+async function fetchGithubCommits() {
+  const repo = String(process.env.GITHUB_REPO || 'justinsung10192-cmyk/orderingMaster2').trim();
+  const token = String(process.env.GITHUB_TOKEN || '').trim();
+  if (!repo.includes('/')) return [];
+  try {
+    const url = `https://api.github.com/repos/${repo}/commits?per_page=30`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'ordering-master',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const commits = await res.json();
+    return (Array.isArray(commits) ? commits : []).map((c) => {
+      const msg = String(c?.commit?.message || '').trim();
+      const lines = msg.split('\n');
+      return {
+        version: String(c?.sha || '').slice(0, 7),
+        title: lines[0] || '',
+        body: lines.slice(1).join('\n').trim().slice(0, 300),
+        createdAt: c?.commit?.author?.date || '',
+        source: 'git',
+      };
+    });
+  } catch (_) {
+    return [];
+  }
+}
+
 export const actions = {
   /* ---------- AI 設定（管理員） ---------- */
   async aiGetSettings(_data, ctx) {
@@ -243,9 +276,17 @@ export const actions = {
   /* ---------- 更新日誌 ---------- */
   async getChangelog(_data, ctx) {
     const rows = await listRows('changelog', { classId: '', order: 'created_at', orderAscending: false, limit: 100 });
-    return {
-      changelog: rows.map((r) => ({ id: sid(r.id), version: r.version, title: r.title, body: r.body, createdAt: r.created_at })),
-    };
+    const manual = rows.map((r) => ({ id: sid(r.id), version: r.version, title: r.title, body: r.body, createdAt: r.created_at, source: 'manual' }));
+    const git = await fetchGithubCommits();
+    const seen = new Set();
+    const merged = [];
+    for (const entry of [...manual, ...git]) {
+      const key = entry.version || entry.title;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(entry);
+    }
+    return { changelog: merged };
   },
 
   async adminAddChangelog(data, ctx) {

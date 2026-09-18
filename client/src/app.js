@@ -898,7 +898,7 @@ async function showMyQr(type) {
           <button data-close-sheet class="mt-4 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">完成</button>
         </section>
       </div>`;
-    if (window.QRCode) new window.QRCode($('#my-qr'), { text: JSON.stringify(result.payload), width: 200, height: 200 });
+    if (window.QRCode) new window.QRCode($('#my-qr'), { text: JSON.stringify(result.payload), width: 280, height: 280, colorDark: '#000000', colorLight: '#ffffff', correctLevel: (window.QRCode.CorrectLevel && window.QRCode.CorrectLevel.H) || 2 });
     else { const el = $('#my-qr'); if (el) el.textContent = 'QR 庫載入中，請稍後重試。'; }
   } catch (error) {
     toast(error.message, 'error');
@@ -1690,9 +1690,9 @@ function openPayModal(ctx) {
   $('#pay-full').addEventListener('click', async () => {
     try {
       await busy(async () => {
-        await api('adminSettleCash', { userId: ctx.userId, orderIds: [ctx.orderId] });
+        const r = await api('adminSettleCash', { userId: ctx.userId, orderIds: [ctx.orderId] });
         closeModal();
-        toast('已全額結清。', 'success');
+        toast(r.walletUsed > 0 ? `已全額結清（餘額抵 $${money(r.walletUsed)}）。` : '已全額結清。', 'success');
         await refreshAdmin();
       });
     } catch (e) { toast(e.message, 'error'); }
@@ -1727,7 +1727,7 @@ async function openChangelogModal() {
             ${list.length ? list.map((c) => `
               <div class="mb-3 rounded-xl bg-mist/50 p-3.5">
                 <div class="flex items-center gap-2">
-                  <span class="rounded-full bg-ledger px-2 py-0.5 text-[10px] font-bold text-white">${escapeHtml(c.version)}</span>
+                  <span class="rounded-full bg-ledger px-2 py-0.5 text-[10px] font-bold text-white">${escapeHtml(c.version)}${c.source === 'git' ? ' ·自動' : ''}</span>
                   <span class="font-bold text-ledger">${escapeHtml(c.title)}</span>
                 </div>
                 <p class="mt-1.5 whitespace-pre-line text-xs leading-5 text-slate-600">${escapeHtml(c.body)}</p>
@@ -2091,7 +2091,7 @@ function openScanner() {
     state.scanner = new window.Html5Qrcode('qr-reader');
     state.scanner.start(
       { facingMode: 'environment' },
-      { fps: 15, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0, rememberLastUsedCamera: true },
+      { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
       onScanSuccess,
       () => {},
     ).catch(() => {
@@ -2619,10 +2619,10 @@ async function handleAction(action, target) {
       const orderIds = (state.admin.lastVerify?.unpaidOrders || []).map((order) => order.orderId);
       if (!orderIds.length) return;
       await busy(async () => {
-        await api('adminSettleCash', { userId, orderIds });
+        const r = await api('adminSettleCash', { userId, orderIds });
         const last = state.admin.lastVerify;
         if (last) { last.unpaidOrders = []; last.totalDebt = 0; }
-        toast('已現金結清。', 'success');
+        toast(r.walletUsed > 0 ? `已結清：餘額抵 $${money(r.walletUsed)}，現金 $${money((r.settled || 0) - (r.walletUsed || 0))}。` : '已現金結清。', 'success');
         renderView();
       });
       break;
@@ -2788,7 +2788,7 @@ async function manualRefresh() {
 
 function openWeekCutoffModal() {
   const dates = weekDates(state.admin.scheduleWeek);
-  const defaultVal = dates.length ? `${dates[0]}T09:30` : '';
+  const defaultVal = dates.length ? `${dates[0]}T10:00` : '';
   promptModal('設定本週統一截止時間', [
     { name: 'cutoff', label: '截止時間（套用到本週所有場次）', type: 'datetime-local', value: defaultVal },
   ], async (v) => {
@@ -3558,7 +3558,7 @@ async function saveAiItems(storeId) {
 function openSessionEditor(date, sessionId) {
   const storeOptions = (state.admin.schedule?.stores || []).map((store) => `<option value="${store.storeId}">${escapeHtml(store.name)}</option>`).join('');
   const existing = sessionId ? (state.admin.schedule?.sessions || []).find((s) => s.sessionId === sessionId) : null;
-  const cutoffDefault = existing ? existing.cutoffTime.slice(0, 16) : `${date}T09:30`;
+  const cutoffDefault = existing ? existing.cutoffTime.slice(0, 16) : `${date}T10:00`;
 
   modalRoot.innerHTML = `
     <div class="fixed inset-0 z-50 flex items-end justify-center bg-ledger/50">

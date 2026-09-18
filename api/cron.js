@@ -86,43 +86,45 @@ export default async function handler(req, res) {
     }
 
     // 3) 欠繳催繳（頻率 6/12/24 小時；只通知「截止後超過 24 小時仍未結清」者）
-    const classRow = await findOne('classes', { class_id: 'demo' });
-    const remindHours = Number(classRow?.overdue_remind_hours) || 24;
-    const lastOverdue = await getAppSetting('', 'last_overdue_reminder', '');
-    const lastTs = lastOverdue ? Date.parse(lastOverdue) : 0;
-    if (!lastTs || now - lastTs >= remindHours * 3600 * 1000) {
-      // 找出「截止時間已超過 24 小時」的場次，再抓其未結清訂單
-      const cutoffThreshold = new Date(now - 24 * 3600 * 1000).toISOString();
-      const { data: expiredSessions, error: sessErr } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('class_id', 'demo')
-        .eq('is_deleted', false)
-        .lt('cutoff_time', cutoffThreshold);
-      if (!sessErr && (expiredSessions || []).length) {
-        const sessionIds = expiredSessions.map((session) => session.id);
-        const { data: unpaidOrders } = await supabase
-          .from('orders')
-          .select('*')
-          .in('session_id', sessionIds)
-          .in('payment_status', ['UnpaidCash', 'PartiallyPaid'])
-          .eq('is_deleted', false);
-        const userIds = [...new Set(
-          (unpaidOrders || [])
-            .filter((order) => outstandingOf(order) > 0)
-            .map((order) => order.user_id)
-            .filter((value) => value != null),
-        )];
-        for (const userId of userIds) {
-          await sendPushToUser(Number(userId), {
-            title: '午餐費用提醒',
-            body: '你還有超過 24 小時未結清的午餐費用，請記得繳交。',
-            url: '/',
-          });
-          result.overdueReminders += 1;
+    const { data: classes } = await supabase.from('classes').select('*');
+    for (const cls of classes || []) {
+      const remindHours = Number(cls.overdue_remind_hours) || 24;
+      const lastOverdue = await getAppSetting(cls.class_id, 'last_overdue_reminder', '');
+      const lastTs = lastOverdue ? Date.parse(lastOverdue) : 0;
+      if (!lastTs || now - lastTs >= remindHours * 3600 * 1000) {
+        // 找出「截止時間已超過 24 小時」的場次，再抓其未結清訂單
+        const cutoffThreshold = new Date(now - 24 * 3600 * 1000).toISOString();
+        const { data: expiredSessions, error: sessErr } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('class_id', cls.class_id)
+          .eq('is_deleted', false)
+          .lt('cutoff_time', cutoffThreshold);
+        if (!sessErr && (expiredSessions || []).length) {
+          const sessionIds = expiredSessions.map((session) => session.id);
+          const { data: unpaidOrders } = await supabase
+            .from('orders')
+            .select('*')
+            .in('session_id', sessionIds)
+            .in('payment_status', ['UnpaidCash', 'PartiallyPaid'])
+            .eq('is_deleted', false);
+          const userIds = [...new Set(
+            (unpaidOrders || [])
+              .filter((order) => outstandingOf(order) > 0)
+              .map((order) => order.user_id)
+              .filter((value) => value != null),
+          )];
+          for (const userId of userIds) {
+            await sendPushToUser(Number(userId), {
+              title: '午餐費用提醒',
+              body: '你還有超過 24 小時未結清的午餐費用，請記得繳交。',
+              url: '/',
+            });
+            result.overdueReminders += 1;
+          }
         }
+        await setAppSetting(cls.class_id, 'last_overdue_reminder', new Date(now).toISOString());
       }
-      await setAppSetting('', 'last_overdue_reminder', new Date(now).toISOString());
     }
 
     // 4) 行事曆提醒：考試／作業「前一天上午 8:00 後」（台灣時間）推播一次
@@ -131,28 +133,32 @@ export default async function handler(req, res) {
       const tomorrow = new Date(now + 8 * 60 * 60 * 1000);
       tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
       const tomorrowDate = `${tomorrow.getUTCFullYear()}-${String(tomorrow.getUTCMonth() + 1).padStart(2, '0')}-${String(tomorrow.getUTCDate()).padStart(2, '0')}`;
-      const lastCalendar = await getAppSetting('demo', 'last_calendar_reminder', '');
-      if (lastCalendar !== tomorrowDate) {
-        const { data: events } = await supabase
-          .from('calendar_events')
-          .select('*')
-          .eq('class_id', 'demo')
-          .eq('event_date', tomorrowDate)
-          .in('category', ['考試', '作業']);
-        if ((events || []).length) {
-          const titles = [...new Set((events || []).map((event) => event.title))].slice(0, 5).join('、');
-          await sendPushToClass('demo', {
-            title: '明天有考試／作業',
-            body: `${tomorrowDate.slice(5).replace('-', '/')}：${titles}${(events || []).length > 5 ? ' 等' : ''}`,
-            url: '/',
-          });
-          result.calendarReminders = (events || []).length;
+      for (const cls of classes || []) {
+        const lastCalendar = await getAppSetting(cls.class_id, 'last_calendar_reminder', '');
+        if (lastCalendar !== tomorrowDate) {
+          const { data: events } = await supabase
+            .from('calendar_events')
+            .select('*')
+            .eq('class_id', cls.class_id)
+            .eq('event_date', tomorrowDate)
+            .in('category', ['考試', '作業']);
+          if ((events || []).length) {
+            const titles = [...new Set((events || []).map((event) => event.title))].slice(0, 5).join('、');
+            await sendPushToClass(cls.class_id, {
+              title: '明天有考試／作業',
+              body: `${tomorrowDate.slice(5).replace('-', '/')}：${titles}${(events || []).length > 5 ? ' 等' : ''}`,
+              url: '/',
+            });
+            result.calendarReminders += (events || []).length;
+          }
+          await setAppSetting(cls.class_id, 'last_calendar_reminder', tomorrowDate);
         }
-        await setAppSetting('demo', 'last_calendar_reminder', tomorrowDate);
       }
     }
 
-    result.materialized = await materializeRecurring('demo');
+    for (const cls of classes || []) {
+      result.materialized += await materializeRecurring(cls.class_id);
+    }
     return sendJson(res, { ok: true, data: result });
   } catch (error) {
     return sendJson(res, { ok: false, error: error?.message || '排程執行失敗。' });

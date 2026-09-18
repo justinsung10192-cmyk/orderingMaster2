@@ -96,7 +96,7 @@ export const actions = {
       p_user_id: target.id,
       p_order_ids: validIds,
     });
-    return { ok: true, settled: num(result.settled) };
+    return { ok: true, settled: num(result.settled), walletUsed: num(result.wallet_used) };
   },
 
   // 一週結算：把該週所有「現金未繳」的訂單一次結清（與一般場次一樣每週收一次錢）
