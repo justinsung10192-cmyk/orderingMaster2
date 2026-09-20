@@ -1619,25 +1619,25 @@ async function handleAction(action, target) {
     case 'reco-delete': openConfirm('刪除推薦', '確定刪除此推薦嗎？', async () => { await api('adminDeleteRecommendation', { id: target.getAttribute('data-id') }); await refreshAdmin(); }); break;
 
     // 請假
-    case 'open-leave': await busy(() => (await getAdmin()).openLeaveModal()); break;
+    case 'open-leave': await busy(async () => (await getAdmin()).openLeaveModal()); break;
     case 'approve-leave': openConfirm('批准請假', '批准後將取消該日訂單並退費（若已繳）。確定嗎？', async () => { await api('adminResolveLeave', { id: target.getAttribute('data-id'), approve: true }); toast('已批准請假。', 'success'); await refreshAdmin(); }); break;
     case 'reject-leave': openConfirm('駁回請假', '確定駁回此請假申請嗎？申請者會收到通知。', async () => { await api('adminResolveLeave', { id: target.getAttribute('data-id'), approve: false }); toast('已駁回請假。', 'success'); await refreshAdmin(); }); break;
 
     // 請客場次（管理員）
-    case 'open-treat': await busy(() => (await getAdmin()).openTreatSessionModal()); break;
+    case 'open-treat': await busy(async () => (await getAdmin()).openTreatSessionModal()); break;
 
     // 自訂欠費（使用者彼此）
-    case 'open-debt': await busy(() => (await getAdmin()).openDebtModal()); break;
+    case 'open-debt': await busy(async () => (await getAdmin()).openDebtModal()); break;
     case 'settle-debt': openConfirm('核銷欠費', '確定已收到這筆錢並核銷嗎？', async () => { await api('debtSettle', { id: target.getAttribute('data-id') }); toast('已核銷。', 'success'); await (await getAdmin()).openDebtModal(); }); break;
     case 'del-debt': openConfirm('刪除欠費', '確定刪除此筆欠費紀錄嗎？', async () => { await api('debtDelete', { id: target.getAttribute('data-id') }); toast('已刪除。', 'success'); await (await getAdmin()).openDebtModal(); }); break;
 
     // 更新日誌
-    case 'open-changelog': await busy(() => (await getAdmin()).openChangelogModal()); break;
-    case 'manage-changelog': await busy(() => (await getAdmin()).openManageChangelogModal()); break;
+    case 'open-changelog': await busy(async () => (await getAdmin()).openChangelogModal()); break;
+    case 'manage-changelog': await busy(async () => (await getAdmin()).openManageChangelogModal()); break;
     case 'del-changelog': openConfirm('刪除日誌', '確定刪除此更新日誌嗎？', async () => { await api('adminDeleteChangelog', { id: target.getAttribute('data-id') }); await (await getAdmin()).openManageChangelogModal(); }); break;
 
     // AI 設定
-    case 'ai-settings': await busy(() => (await getAdmin()).openAiSettingsModal()); break;
+    case 'ai-settings': await busy(async () => (await getAdmin()).openAiSettingsModal()); break;
 
     // 部分繳費
     // 師長角色
