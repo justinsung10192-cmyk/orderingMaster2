@@ -947,7 +947,7 @@ function loadScript(src) {
   return scriptCache[src];
 }
 
-function showMyQr(type) {
+async function showMyQr(type) {
   try {
     const isPay = type === 'pay';
     const result = await api('createVerification', { type: isPay ? 'pay' : 'pickup' });
