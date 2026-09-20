@@ -47,7 +47,8 @@ export const actions = {
 
     await insertRow('votes', { class_id: ctx.classId, user_id: ctx.user.id, store_id: store.id, week_label: weekLabel });
     const { tally } = await tallyVotes(ctx.classId, weekLabel);
-    return { ok: true, myVotes: [store.id].map(String), tally, remaining: VOTES_PER_WEEK - myCount - 1 };
+    const myVotes = await listRows('votes', { classId: ctx.classId, filters: { user_id: ctx.user.id, week_label: weekLabel } });
+    return { ok: true, myVotes: myVotes.map((vote) => String(vote.store_id)), tally, remaining: VOTES_PER_WEEK - myVotes.length };
   },
 
   async removeVote(data, ctx) {

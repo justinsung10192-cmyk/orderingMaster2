@@ -785,14 +785,17 @@ async function toggleVote(storeId) {
   const store = state.boot?.stores?.find((s) => s.storeId === storeId);
   try {
     await busy(async () => {
+      let r;
       if (myVotes.has(storeId)) {
-        await api('removeVote', { storeId });
+        r = await api('removeVote', { storeId });
         toast(`已取消「${store.name}」的票。`);
       } else {
-        await api('castVote', { storeId });
+        r = await api('castVote', { storeId });
         toast(`已投給「${store.name}」！`);
       }
-      state.boot = await api('getBootstrap');
+      // 以 API 回傳直接更新，避免重新載入整包 getBootstrap
+      state.boot.myVotes = r.myVotes || [];
+      state.boot.voteTally = r.tally || {};
       renderView();
     });
   } catch (error) {
@@ -877,7 +880,22 @@ async function loadWalletDetail() {
 }
 
 /* ============================ 我的 QR / PIN ============================ */
-async function showMyQr(type) {
+async // 用到時才動態載入外部腳本（掃碼／QR 庫），避免冷啟動就載入 1.3MB 重庫
+const scriptCache = {};
+function loadScript(src) {
+  if (scriptCache[src]) return scriptCache[src];
+  scriptCache[src] = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.async = true;
+    el.onload = () => resolve();
+    el.onerror = () => { delete scriptCache[src]; reject(new Error('載入失敗。')); };
+    document.head.appendChild(el);
+  });
+  return scriptCache[src];
+}
+
+function showMyQr(type) {
   try {
     const isPay = type === 'pay';
     const result = await api('createVerification', { type: isPay ? 'pay' : 'pickup' });
@@ -898,8 +916,12 @@ async function showMyQr(type) {
           <button data-close-sheet class="mt-4 w-full rounded-xl bg-ledger py-3 text-sm font-bold text-white">完成</button>
         </section>
       </div>`;
-    if (window.QRCode) new window.QRCode($('#my-qr'), { text: JSON.stringify(result.payload), width: 280, height: 280, colorDark: '#000000', colorLight: '#ffffff', correctLevel: (window.QRCode.CorrectLevel && window.QRCode.CorrectLevel.H) || 2 });
-    else { const el = $('#my-qr'); if (el) el.textContent = 'QR 庫載入中，請稍後重試。'; }
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+      new window.QRCode($('#my-qr'), { text: JSON.stringify(result.payload), width: 280, height: 280, colorDark: '#000000', colorLight: '#ffffff', correctLevel: (window.QRCode.CorrectLevel && window.QRCode.CorrectLevel.H) || 2 });
+    } catch (_) {
+      const el = $('#my-qr'); if (el) el.textContent = 'QR 庫載入失敗，請改用 PIN。';
+    }
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -2087,7 +2109,8 @@ function openScanner() {
       </section>
     </div>`;
 
-  if (window.Html5Qrcode) {
+  $('#qr-reader').innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入中…</p>';
+  loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js').then(() => {
     state.scanner = new window.Html5Qrcode('qr-reader');
     state.scanner.start(
       { facingMode: 'environment' },
@@ -2098,9 +2121,10 @@ function openScanner() {
       const readerEl = $('#qr-reader');
       if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用 PIN 輸入。</p>';
     });
-  } else {
-    $('#qr-reader').innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入中…</p>';
-  }
+  }).catch(() => {
+    const readerEl = $('#qr-reader');
+    if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入失敗，請改用 PIN 輸入。</p>';
+  });
 }
 
 async function onScanSuccess(decodedText) {

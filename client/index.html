@@ -15,10 +15,9 @@
     <title>訂餐通</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
     <link rel="stylesheet" href="/src/style.css" />
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- 掃碼／QR 庫改為用到時才動態載入（app.js 的 loadScript），避免冷啟動就載入 1.3MB 重庫 -->
   </head>
   <body>
     <div id="app" class="min-h-dvh"></div>

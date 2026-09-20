@@ -95,27 +95,27 @@ export const actions = {
     const classId = user.class_id;
     const classRow = await getClass(classId);
     const pureBalanceMode = Boolean(classRow.pure_balance_mode);
+    const voteWeek = nextWeekLabel();
 
-    const { sessions, orders } = await loadOpenSessions(user, { pureBalanceMode });
-
-    // 店家（供投票）
-    const stores = (await listStoresForClass(classId, { includeInactive: false })).map((store) => ({
+    // 效能：把彼此獨立的查詢並行化，避免「一個等一個」的串列往返
+    const [sessionData, storeRows, myVotes, allVotes, holidays, announcement] = await Promise.all([
+      loadOpenSessions(user, { pureBalanceMode }),
+      listStoresForClass(classId, { includeInactive: false }),
+      listRows('votes', { classId, filters: { user_id: user.id, week_label: voteWeek } }),
+      listRows('votes', { classId, filters: { week_label: voteWeek } }),
+      listRows('holidays', { classId }),
+      getAppSetting(classId, 'announcement', ''),
+    ]);
+    const { sessions, orders } = sessionData;
+    const stores = storeRows.map((store) => ({
       storeId: sid(store.id),
       name: store.name,
       isActive: Boolean(store.is_active),
     }));
-
-    // 下週投票
-    const voteWeek = nextWeekLabel();
-    const myVotes = await listRows('votes', { classId, filters: { user_id: user.id, week_label: voteWeek } });
-    const allVotes = await listRows('votes', { classId, filters: { week_label: voteWeek } });
     const tally = {};
     allVotes.forEach((vote) => {
       tally[String(vote.store_id)] = (tally[String(vote.store_id)] || 0) + 1;
     });
-
-    const holidays = await listRows('holidays', { classId });
-    const announcement = await getAppSetting(classId, 'announcement', '');
 
     return {
       user: publicUser(user),
