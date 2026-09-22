@@ -41,6 +41,11 @@ constexpr uint8_t LED_PIN = 2;    // = LED_BUILTIN
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 
+// 去抖與心跳狀態
+String lastUid = "";            // 上一次上報的 UID
+bool cardReported = false;       // 目前這張卡是否已上報（卡未移走不重複）
+unsigned long lastHeartbeatMs = 0;
+
 void beep(int times, int delayMs = 120) {
   if (BUZZER_PIN < 0) return;
   for (int i = 0; i < times; i++) {
@@ -70,8 +75,8 @@ String readUidHex() {
   return uid;
 }
 
-// 把 UID POST 到後端，回傳伺服器回應字串（失敗回傳空字串）
-String postScan(const String& uid) {
+// 把動作 POST 到後端，回傳伺服器回應字串（失敗回傳空字串）
+String postAction(const String& action, const String& uid) {
   if (WiFi.status() != WL_CONNECTED) return "";
 
   WiFiClientSecure client;
@@ -82,7 +87,7 @@ String postScan(const String& uid) {
   if (!http.begin(client, String(SERVER_URL) + "/api/gas")) return "";
   http.addHeader("Content-Type", "application/json");
 
-  String body = "{\"action\":\"rfidScan\",\"data\":{";
+  String body = "{\"action\":\"" + action + "\",\"data\":{";
   body += "\"uid\":\"" + uid + "\",";
   body += "\"stationId\":\"" + String(STATION_ID) + "\",";
   body += "\"secret\":\"" + String(SECRET) + "\"";
@@ -92,8 +97,14 @@ String postScan(const String& uid) {
   String resp = http.getString();
   http.end();
 
-  if (code == 200) return resp;
-  return "";
+  return (code == 200) ? resp : "";
+}
+
+// 每 20 秒送一次心跳，讓後台知道讀卡機仍在線
+void heartbeatTick() {
+  if (millis() - lastHeartbeatMs < 20000) return;
+  lastHeartbeatMs = millis();
+  postAction("rfidHeartbeat", "");
 }
 
 void setup() {
@@ -133,37 +144,48 @@ void loop() {
     return;
   }
 
-  // 無新卡片則直接返回
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    delay(50);
+  // 沒有偵測到卡片 → 重設「已上報」旗標，並每 20 秒送一次心跳
+  if (!rfid.PICC_IsNewCardPresent()) {
+    cardReported = false;
+    heartbeatTick();
+    delay(40);
     return;
   }
 
-  String uid = readUidHex();
-  Serial.println("[RFID] 感應到卡片 UID: " + uid);
+  if (!rfid.PICC_ReadCardSerial()) { delay(40); return; }
 
-  String resp = postScan(uid);
-  if (resp.length() == 0) {
-    Serial.println("[RFID] 伺服器連線失敗，請檢查網路或 SERVER_URL。");
-    blinkLed(3, 120);
-    beep(1, 400);
-  } else {
-    Serial.println("[RFID] 回應: " + resp);
-    // 根據回應型態給予不同提示
-    if (resp.indexOf("\"registered\"") >= 0) {
-      blinkLed(2, 100);        // 註冊成功：閃 2 下
-      beep(2, 100);
-    } else if (resp.indexOf("\"scanned\"") >= 0) {
-      blinkLed(1, 150);        // 掃描成功：閃 1 下
-      beep(1, 150);
-    } else {
-      blinkLed(3, 120);        // 錯誤（未綁定/密鑰錯誤）：閃 3 下
+  String uid = readUidHex();
+  if (uid != lastUid) { lastUid = uid; cardReported = false; }
+
+  // 同一張卡尚未移走 → 只上報一次（去抖）
+  if (!cardReported) {
+    cardReported = true;
+    Serial.println("[RFID] 感應到卡片 UID: " + uid);
+    blinkLed(1, 60); // 立即回饋「已讀到」
+
+    String resp = postAction("rfidScan", uid);
+    if (resp.length() == 0) {
+      Serial.println("[RFID] 伺服器連線失敗，請檢查網路或 SERVER_URL。");
+      blinkLed(3, 120);
       beep(1, 400);
+    } else {
+      Serial.println("[RFID] 回應: " + resp);
+      if (resp.indexOf("\"registered\"") >= 0) {
+        blinkLed(2, 100);        // 註冊成功：閃 2 下
+        beep(2, 100);
+      } else if (resp.indexOf("\"scanned\"") >= 0) {
+        blinkLed(1, 150);        // 掃描成功：閃 1 下
+        beep(1, 150);
+      } else if (resp.indexOf("\"duplicate\"") >= 0) {
+        // 後端去抖：卡未移走，不提示
+      } else {
+        blinkLed(3, 120);        // 錯誤（未綁定/密鑰錯誤）：閃 3 下
+        beep(1, 400);
+      }
     }
   }
 
-  // 停止與卡片通訊，並等待卡片移開，避免同張卡重複觸發
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
-  delay(800);
+  delay(60); // 微去抖（已用旗標避免重複，不需長延遲）
 }

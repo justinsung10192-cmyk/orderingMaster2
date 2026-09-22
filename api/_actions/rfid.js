@@ -4,6 +4,11 @@ import { appError, sid, randomCode } from '../_lib/util.js';
 import { findOne, listRows, listRowsIn, insertRow, deleteRows, supabase, getAppSetting, setAppSetting } from '../_lib/db.js';
 import { resolveContext } from './verification.js';
 
+// 同張卡在 X 毫秒內不重複處理（卡未移走只記一次）
+const DEBOUNCE_MS = 2500;
+// 最近 X 毫秒內有活動（感應/心跳）即視為裝置在線
+const HEARTBEAT_WINDOW_MS = 45000;
+
 // 讀取或產生裝置密鑰（D1 Mini 韌體需填入同一密鑰）
 async function ensureDeviceSecret(classId) {
   const secret = await getAppSetting(classId, 'rfid_device_secret');
@@ -19,7 +24,20 @@ async function verifyDeviceSecret(classId, secret) {
   return Boolean(row && row.value && row.value === secret);
 }
 
-// UID 正規化：去空白、去冒號/減號、轉大寫（MFRC522 常以 "AA BB CC DD" 或 "AABBCCDD" 呈現）
+// 記錄裝置最後活動時間（感應或心跳都算）
+function touchLastSeen(classId) {
+  return supabase.from('app_settings').upsert(
+    { class_id: classId, key: 'rfid_last_seen', value: String(Date.now()) },
+    { onConflict: 'class_id,key' },
+  );
+}
+
+async function isDeviceOnline(classId) {
+  const t = await getAppSetting(classId, 'rfid_last_seen');
+  return Boolean(t && Date.now() - Number(t) < HEARTBEAT_WINDOW_MS);
+}
+
+// UID 正規化：去空白、去冒號/減號/逗號、轉大寫
 function normalizeUid(uid) {
   return String(uid || '').trim().toUpperCase().replace(/[\s:,-]/g, '');
 }
@@ -28,7 +46,8 @@ export const actions = {
   // 管理員：RFID 設定（裝置密鑰；首次呼叫自動產生，不依賴卡片表）
   async rfidGetConfig(data, ctx) {
     const secret = await ensureDeviceSecret(ctx.classId);
-    return { secret, enabled: true };
+    const deviceOnline = await isDeviceOnline(ctx.classId);
+    return { secret, enabled: true, deviceOnline };
   },
 
   // 管理員：已綁定卡片列表（含座號、姓名）
@@ -99,8 +118,22 @@ export const actions = {
     if (!classId) throw appError('INVALID_INPUT', '缺少站台（班級）識別碼。');
     if (!(await verifyDeviceSecret(classId, data.secret))) throw appError('FORBIDDEN', '裝置密鑰不正確。');
 
+    // 並行：記錄在線 + 去抖檢查 + 待註冊 + 卡片綁定（一次往返）
+    const [, recentRes, pending, card] = await Promise.all([
+      touchLastSeen(classId),
+      supabase.from('rfid_events').select('created_at').eq('class_id', classId).eq('uid', uid).order('id', { ascending: false }).limit(1),
+      findOne('rfid_pending', { class_id: classId }),
+      findOne('rfid_cards', { class_id: classId, uid }),
+    ]);
+
+    // 去抖：同張卡在 DEBOUNCE_MS 內不重複處理（卡未移走只記一次）
+    const recent = recentRes && recentRes.data;
+    if (!recentRes.error && recent && recent[0]) {
+      const age = Date.now() - new Date(recent[0].created_at).getTime();
+      if (age < DEBOUNCE_MS) return { ok: true, duplicate: true, uid };
+    }
+
     // 1) 有「待註冊」→ 綁定這張卡片
-    const pending = await findOne('rfid_pending', { class_id: classId });
     if (pending) {
       await supabase.from('rfid_cards').upsert(
         { class_id: classId, uid, user_id: pending.user_id, registered_at: new Date().toISOString() },
@@ -116,7 +149,6 @@ export const actions = {
     }
 
     // 2) 一般掃描 → 解析使用者
-    const card = await findOne('rfid_cards', { class_id: classId, uid });
     if (!card) {
       await insertRow('rfid_events', { class_id: classId, uid, kind: 'unknown' });
       throw appError('NOT_FOUND', '未綁定的卡片。');
@@ -130,10 +162,22 @@ export const actions = {
     return { ok: true, type: 'scanned', uid, seatNo: student.seat_no, name: student.student_name };
   },
 
-  // 管理員（手機）：輪詢最新感應事件，附上完整核銷內容（餐點、欠費、餘額）
+  // 裝置（D1 Mini）：心跳，回報裝置仍在線。需裝置密鑰。
+  async rfidHeartbeat(data, ctx) {
+    const classId = String(data.stationId || '').trim();
+    if (!classId) throw appError('INVALID_INPUT', '缺少站台（班級）識別碼。');
+    if (!(await verifyDeviceSecret(classId, data.secret))) throw appError('FORBIDDEN', '裝置密鑰不正確。');
+    await touchLastSeen(classId);
+    return { ok: true };
+  },
+
+  // 管理員（手機）：輪詢最新感應事件，附上完整核銷內容與裝置在線狀態
   async rfidPoll(data, ctx) {
     const sinceId = Number(data.sinceId) || 0;
-    const events = await listRows('rfid_events', { classId: ctx.classId, order: 'id', orderAscending: false, limit: 10 });
+    const [events, lastSeen] = await Promise.all([
+      listRows('rfid_events', { classId: ctx.classId, order: 'id', orderAscending: false, limit: 10 }),
+      getAppSetting(ctx.classId, 'rfid_last_seen'),
+    ]);
     const fresh = events.filter((e) => Number(e.id) > sinceId).sort((a, b) => Number(a.id) - Number(b.id));
     let lastId = sinceId;
     const out = [];
@@ -145,6 +189,10 @@ export const actions = {
       }
       out.push(item);
     }
-    return { events: out, lastId: sid(lastId) };
+    return {
+      events: out,
+      lastId: sid(lastId),
+      deviceOnline: Boolean(lastSeen && Date.now() - Number(lastSeen) < HEARTBEAT_WINDOW_MS),
+    };
   },
 };

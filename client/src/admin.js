@@ -512,6 +512,7 @@ async function renderAdminRfid(content) {
   let cardHint = '';
   try {
     cfg = await api('rfidGetConfig');
+    rfidDeviceOnline = Boolean(cfg.deviceOnline);
   } catch (error) {
     content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
     return;
@@ -525,6 +526,10 @@ async function renderAdminRfid(content) {
 
   content.innerHTML = `
     <div class="space-y-4">
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <p class="text-xs font-bold tracking-[.12em] text-slate-400">STATUS</p>
+        <div id="rfid-status" class="mt-2 flex flex-wrap items-center gap-2"></div>
+      </div>
       <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
         <div class="flex items-center justify-between">
           <div><p class="text-xs font-bold tracking-[.12em] text-slate-400">RFID SCANNER</p><h3 class="font-serif text-lg font-black">感應掃描（等同掃碼）</h3></div>
@@ -573,15 +578,36 @@ async function renderAdminRfid(content) {
         <p class="mt-2 text-[11px] leading-4 text-slate-400">把密鑰填入 D1 Mini 韌體常數 SECRET，並將 SERVER_URL 設為你的 Vercel 網址。</p>
       </div>
     </div>`;
+  renderRfidStatus();
 }
 
 let rfidTimer = null;
 let rfidMode = null; // 'scan' | 'register'
 let rfidLastId = 0;
+let rfidDeviceOnline = false;
+let rfidLastPollAt = 0;
 
 function stopRfidPolling() {
   if (rfidTimer) { clearInterval(rfidTimer); rfidTimer = null; }
   rfidMode = null;
+}
+
+function renderRfidStatus() {
+  const el = $('#rfid-status');
+  if (!el) return;
+  let modeBadge;
+  if (rfidMode === 'scan') {
+    modeBadge = '<span class="inline-flex items-center gap-1.5 rounded-full bg-ledger/10 px-3 py-1.5 text-xs font-bold text-ledger"><span class="h-2 w-2 animate-pulse rounded-full bg-ledger"></span>掃描模式中</span>';
+  } else if (rfidMode === 'register') {
+    modeBadge = '<span class="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-600"><span class="h-2 w-2 animate-pulse rounded-full bg-amber-500"></span>註冊模式中</span>';
+  } else {
+    modeBadge = '<span class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500"><span class="h-2 w-2 rounded-full bg-slate-300"></span>待機（未啟動）</span>';
+  }
+  const connBadge = rfidDeviceOnline
+    ? '<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>讀卡機已連線</span>'
+    : '<span class="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-500"><span class="h-2 w-2 animate-pulse rounded-full bg-red-500"></span>讀卡機離線</span>';
+  const sync = rfidLastPollAt ? '<span class="text-[11px] text-slate-400">最後同步 ' + new Date(rfidLastPollAt).toLocaleTimeString('zh-TW', { hour12: false }) + '</span>' : '';
+  el.innerHTML = modeBadge + connBadge + sync;
 }
 
 async function rfidToggleScan() {
@@ -597,14 +623,20 @@ async function rfidToggleScan() {
   const res = $('#rfid-scan-result');
   if (res) res.innerHTML = '<p class="rounded-xl bg-mist px-3 py-4 text-center text-sm text-slate-400">感應掃描已開啟，請學生將卡片靠近讀卡機…</p>';
   // 先建立基準（忽略舊事件），之後只處理「新」感應
-  try { const r = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r.lastId) || 0; } catch (_) {}
-  rfidTimer = setInterval(() => rfidTick(), 1500);
+  try { const r = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r.lastId) || 0; rfidDeviceOnline = Boolean(r.deviceOnline); } catch (_) {}
+  rfidTimer = setInterval(() => rfidTick(), 700);
+  const btn = document.querySelector('[data-action="rfid-toggle-scan"]');
+  if (btn) btn.textContent = '■ 停止感應';
+  renderRfidStatus();
   toast('感應掃描已開啟。', 'success');
 }
 
 async function rfidTick() {
   try {
     const r = await api('rfidPoll', { sinceId: rfidLastId });
+    rfidDeviceOnline = Boolean(r && r.deviceOnline);
+    rfidLastPollAt = Date.now();
+    renderRfidStatus();
     if (!r || !r.events) return;
     rfidLastId = Number(r.lastId) || rfidLastId;
     for (const ev of r.events) {
@@ -634,8 +666,9 @@ async function rfidStartRegister() {
     const status = $('#rfid-register-status');
     if (status) status.innerHTML = `<span class="font-bold text-stamp">註冊中：請將新卡片靠近讀卡機（座號 ${escapeHtml(r.seatNo)} ${escapeHtml(r.name)}）…</span>`;
     // 先建立基準（忽略舊事件）
-    try { const r0 = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r0.lastId) || 0; } catch (_) {}
-    rfidTimer = setInterval(() => rfidTick(), 1500);
+    try { const r0 = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r0.lastId) || 0; rfidDeviceOnline = Boolean(r0.deviceOnline); } catch (_) {}
+    rfidTimer = setInterval(() => rfidTick(), 700);
+    renderRfidStatus();
     toast('註冊模式已開啟，請感應卡片。', 'success');
   } catch (error) {
     toast(error.message, 'error');

@@ -32,7 +32,7 @@ const HANDLERS = {
   ...rfidActions,
 };
 
-const PUBLIC = new Set(['getPublicConfig', 'login', 'rfidScan']);
+const PUBLIC = new Set(['getPublicConfig', 'login', 'rfidScan', 'rfidHeartbeat']);
 
 // 師長帳號：只能使用行事曆與個人設定（不可訂餐、投票、錢包、請假等）
 const TEACHER_ALLOWED = new Set([
