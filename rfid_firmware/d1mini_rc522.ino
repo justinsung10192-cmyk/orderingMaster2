@@ -16,28 +16,28 @@
 #include <MFRC522.h>
 
 // ======================= 請修改這裡 =======================
-const char* WIFI_SSID     = "你的WiFi名稱";
-const char* WIFI_PASSWORD = "你的WiFi密碼";
+const char* WIFI_SSID     = "Iphone 1 pro max";  // 你的 WiFi SSID
+const char* WIFI_PASSWORD = "88888888";  // 你的 WiFi 密碼
 
 // 你的 Vercel 網址（例如 https://orderingmaster2.vercel.app）
 const char* SERVER_URL    = "https://ordering-master-pro.vercel.app";
 
 // 裝置密鑰：登入管理後台 → 「RFID」分頁 → 複製「裝置密鑰」貼到這裡
-const char* SECRET        = "在此貼上裝置密鑰";
+const char* SECRET        = "MJE7T4RP29YE3ZUD";
 
 // 站台（班級）識別碼：預設為 demo（對應資料庫 classes.class_id）
 const char* STATION_ID    = "demo";
 // ==========================================================
 
-// ====== RC522 接腳（D1 Mini，可依實際接線修改）======
-// 常見接法：SDA->D8, SCK->D5, MOSI->D7, MISO->D6, RST->D3
-constexpr uint8_t SS_PIN  = D8;   // SDA
-constexpr uint8_t RST_PIN = D3;   // RST
-// 蜂鳴器（選用，未接就保持 -1）
-constexpr int BUZZER_PIN  = D4;   // 改成 -1 可停用
+// ====== RC522 接腳（使用 GPIO 編號；新版 ESP8266 core 已移除 D0~D8 巨集）======
+// 常見接法：SDA->GPIO15(D8), SCK->GPIO14(D5), MOSI->GPIO13(D7), MISO->GPIO12(D6), RST->GPIO0(D3)
+constexpr uint8_t SS_PIN   = 15;  // SDA  (D8)
+constexpr uint8_t RST_PIN  = 0;   // RST  (D3)
+// 蜂鳴器（選用，未接就保持 -1；接了建議用 GPIO5 / D1）
+constexpr int    BUZZER_PIN = -1; // 改成 GPIO 編號可啟用
 
-// 內建 LED（D1 Mini 板上藍色 LED，低電位點亮）
-constexpr uint8_t LED_PIN = LED_BUILTIN; // = 2
+// 內建 LED（D1 Mini 板上藍色 LED，GPIO2 低電位點亮）
+constexpr uint8_t LED_PIN = 2;    // = LED_BUILTIN
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 
