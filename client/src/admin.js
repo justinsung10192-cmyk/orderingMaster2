@@ -1190,23 +1190,41 @@ async function startNativeScanner(onSuccess) {
   requestAnimationFrame(loop);
 }
 
-// 後備：html5-qrcode（iOS Safari / Firefox 無原生 BarcodeDetector），提高解析度與掃描框
-function startHtml5Scanner() {
-  loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js').then(() => {
-    state.scanner = new window.Html5Qrcode('qr-reader');
-    state.scanner.start(
-      { facingMode: { ideal: 'environment' } },
-      { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.72); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, disableFlip: false, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
-      onScanSuccess,
-      () => {},
-    ).catch(() => {
-      const readerEl = $('#qr-reader');
-      if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用下方「拍照掃描」或 PIN 輸入。</p>';
-    });
-  }).catch(() => {
+// 後備：html5-qrcode（iOS Safari / Firefox 無原生 BarcodeDetector；或原生路徑失敗時）
+// 使用原本可用的設定（facingMode 字串），加入「後鏡頭→前鏡頭」容錯，並提升 fps 與掃描框
+async function startHtml5Scanner() {
+  try {
+    await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
+  } catch (_) {
     const readerEl = $('#qr-reader');
     if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入失敗，請改用下方「拍照掃描」或 PIN 輸入。</p>';
-  });
+    return;
+  }
+
+  const config = {
+    fps: 20,
+    qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.75); return { width: s, height: s }; },
+    aspectRatio: 1.0,
+    rememberLastUsedCamera: true,
+    disableFlip: false,
+    formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean),
+  };
+
+  // 容錯：先後鏡頭（掃碼最理想），失敗再試前鏡頭
+  const cameraAttempts = [{ facingMode: 'environment' }, { facingMode: 'user' }];
+  for (const cam of cameraAttempts) {
+    try {
+      state.scanner = new window.Html5Qrcode('qr-reader');
+      await state.scanner.start(cam, config, onScanSuccess, () => {});
+      return;
+    } catch (_) {
+      try { if (state.scanner) await state.scanner.stop(); } catch (_) {}
+      state.scanner = null;
+    }
+  }
+
+  const readerEl = $('#qr-reader');
+  if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用下方「拍照掃描」或 PIN 輸入。</p>';
 }
 
 // 拍照掃描：iOS 主畫面 PWA（WKWebView）不支援即時相機串流時，用原生相機拍照再解碼，永遠可用
