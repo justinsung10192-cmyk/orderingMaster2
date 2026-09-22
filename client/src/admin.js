@@ -1106,11 +1106,87 @@ function openScanner() {
     </div>`;
 
   $('#qr-reader').innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入中…</p>';
+
+  // 優先使用原生 BarcodeDetector：角度容忍度高、支援反相（深底淺碼）QR、免下載外部庫
+  if ('BarcodeDetector' in window) {
+    startNativeScanner(onScanSuccess).then(() => {}).catch(() => startHtml5Scanner());
+  } else {
+    startHtml5Scanner();
+  }
+}
+
+// 原生掃描器：逐幀同時掃「正常＋反相」兩種畫面，任一角度都能抓到
+async function startNativeScanner(onSuccess) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+  const readerEl = $('#qr-reader');
+  const video = document.createElement('video');
+  video.setAttribute('playsinline', 'true');
+  video.setAttribute('muted', 'true');
+  video.setAttribute('autoplay', 'true');
+  video.srcObject = stream;
+  if (readerEl) { readerEl.innerHTML = ''; readerEl.appendChild(video); video.style.width = '100%'; video.style.maxHeight = '56vh'; video.style.objectFit = 'cover'; }
+  await video.play();
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+
+  let stopped = false;
+  state.scanner = { stop: async () => { stopped = true; stream.getTracks().forEach((t) => t.stop()); } };
+
+  let lastTick = 0;
+  async function scanOnce() {
+    if (stopped || !video.videoWidth) return null;
+    try {
+      let found = null;
+      try { const codes = await detector.detect(video); if (codes && codes.length) found = codes[0]; } catch (_) {}
+      if (!found) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        try { const codes = await detector.detect(canvas); if (codes && codes.length) found = codes[0]; } catch (_) {}
+        // 通道 2：反相畫面（白底黑碼 → 黑底白碼都抓得到）
+        if (!found) {
+          if (typeof ctx.filter === 'string') { ctx.filter = 'invert(1)'; ctx.drawImage(video, 0, 0); ctx.filter = 'none'; }
+          else {
+            ctx.drawImage(video, 0, 0);
+            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const d = img.data;
+            for (let i = 0; i < d.length; i += 4) { d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2]; }
+            ctx.putImageData(img, 0, 0);
+          }
+          try { const codes = await detector.detect(canvas); if (codes && codes.length) found = codes[0]; } catch (_) {}
+        }
+      }
+      return found && found.rawValue ? found.rawValue : null;
+    } catch (_) { return null; }
+  }
+
+  function loop() {
+    if (stopped) return;
+    const now = performance.now();
+    if (now - lastTick > 70) {
+      lastTick = now;
+      scanOnce().then((text) => {
+        if (text) { onSuccess(text); } else { requestAnimationFrame(loop); }
+      }).catch(() => requestAnimationFrame(loop));
+    } else {
+      requestAnimationFrame(loop);
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+// 後備：html5-qrcode（iOS Safari / Firefox 無原生 BarcodeDetector），提高解析度與掃描框
+function startHtml5Scanner() {
   loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js').then(() => {
     state.scanner = new window.Html5Qrcode('qr-reader');
     state.scanner.start(
-      { facingMode: 'environment' },
-      { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
+      { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      { fps: 20, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.78); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, disableFlip: false, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
       onScanSuccess,
       () => {},
     ).catch(() => {

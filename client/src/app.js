@@ -967,7 +967,7 @@ async function showMyQr(type) {
             <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
           </div>
           <div class="mt-4 flex flex-col items-center">
-            <div id="my-qr" class="rounded-2xl border-2 border-dashed border-ledger/20 p-3"></div>
+            <div id="my-qr" class="rounded-2xl border-2 border-dashed border-ledger/20 bg-white p-4"></div>
             <p class="mt-3 text-xs text-slate-400">6 位數 PIN 碼（5 分鐘後失效）</p>
             <p class="pin-box mt-1 font-serif text-4xl font-black text-ledger">${result.pin}</p>
             <p data-cutoff="${result.expiresAt}" class="mt-2 text-xs font-bold text-apricot">${cutoffRemaining(result.expiresAt).text}</p>
@@ -1563,7 +1563,6 @@ async function handleAction(action, target) {
       break;
     }
     case 'set-duty': await openDutyEditor(target.getAttribute('data-date') || state.admin.dashboardDate); break;
-    case 'reset-pw': openConfirm('重設密碼', '將該同學的密碼重設為預設值，下次登入需重新設定。', async () => { await api('adminResetPassword', { userId: target.getAttribute('data-user') }); toast('已重設密碼。', 'success'); await refreshAdmin(); }); break;
     case 'del-user': openConfirm('刪除帳號', '刪除後不可復原（該同學的歷史訂單會保留）。', async () => { await api('adminDeleteUser', { userId: target.getAttribute('data-user') }); await refreshAdmin(); }); break;
 
     // 管理員 - 設定
