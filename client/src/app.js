@@ -1485,6 +1485,7 @@ async function handleAction(action, target) {
 
     // 管理員 - 核銷
     case 'open-scanner': (await getAdmin()).openScanner(); break;
+    case 'scan-photo': (await getAdmin()).scanPhoto(); break;
     case 'pin-input': {
       promptModal('輸入 PIN 碼', [{ name: 'pin', label: '6 位數 PIN', type: 'text' }], async (v) => { const r = await api('adminResolvePin', { pin: v.pin }); closeModal(); (await getAdmin()).renderVerifyResult(r); });
       break;

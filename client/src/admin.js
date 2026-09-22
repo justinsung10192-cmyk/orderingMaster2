@@ -1095,6 +1095,9 @@ function openScanner() {
           <button data-close-sheet class="grid h-9 w-9 place-items-center rounded-full bg-mist text-xl">×</button>
         </div>
         <div id="qr-reader" class="mx-4 overflow-hidden rounded-xl bg-slate-100"></div>
+        <div class="px-5 pt-3">
+          <button data-action="scan-photo" class="w-full rounded-xl border border-stamp/40 bg-white py-3 text-sm font-bold text-stamp">📷 拍照掃描（即時鏡頭無法用時改用）</button>
+        </div>
         <div class="px-5 py-4">
           <p class="text-xs leading-5 text-slate-500">或手動輸入 6 位 PIN：</p>
           <div class="mt-2 flex gap-2">
@@ -1198,12 +1201,50 @@ function startHtml5Scanner() {
       () => {},
     ).catch(() => {
       const readerEl = $('#qr-reader');
-      if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用 PIN 輸入。</p>';
+      if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">無法啟動相機，請改用下方「拍照掃描」或 PIN 輸入。</p>';
     });
   }).catch(() => {
     const readerEl = $('#qr-reader');
-    if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入失敗，請改用 PIN 輸入。</p>';
+    if (readerEl) readerEl.innerHTML = '<p class="p-6 text-center text-xs text-slate-400">掃描元件載入失敗，請改用下方「拍照掃描」或 PIN 輸入。</p>';
   });
+}
+
+// 拍照掃描：iOS 主畫面 PWA（WKWebView）不支援即時相機串流時，用原生相機拍照再解碼，永遠可用
+async function scanPhoto() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.setAttribute('capture', 'environment');
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    toast('圖片解析中…', 'info');
+    try {
+      let text = null;
+      // 1) 原生 BarcodeDetector 解圖片（較快）
+      if ('BarcodeDetector' in window) {
+        try {
+          const bitmap = await createImageBitmap(file);
+          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          const codes = await detector.detect(bitmap);
+          if (codes && codes.length) text = codes[0].rawValue;
+        } catch (_) {}
+      }
+      // 2) html5-qrcode 解圖片（zxing，跨平台，iOS 可用）
+      if (!text) {
+        await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
+        text = await window.Html5Qrcode.scanFile(file, false);
+      }
+      if (text) {
+        onScanSuccess(text);
+      } else {
+        toast('無法辨識此圖片，請拍清楚一點或改用 PIN。', 'error');
+      }
+    } catch (_) {
+      toast('無法辨識此圖片，請拍清楚一點或改用 PIN。', 'error');
+    }
+  };
+  input.click();
 }
 
 async function onScanSuccess(decodedText) {
@@ -1829,6 +1870,7 @@ function promptChangePassword() {
 export { renderAdminView };
 export { renderAdminTab };
 export { openScanner };
+export { scanPhoto };
 export { renderVerifyResult };
 export { openTopupModal };
 export { openPayModal };
