@@ -25,11 +25,10 @@ function normalizeUid(uid) {
 }
 
 export const actions = {
-  // 管理員：RFID 設定（裝置密鑰；首次呼叫自動產生）
+  // 管理員：RFID 設定（裝置密鑰；首次呼叫自動產生，不依賴卡片表）
   async rfidGetConfig(data, ctx) {
     const secret = await ensureDeviceSecret(ctx.classId);
-    const cards = await listRows('rfid_cards', { classId: ctx.classId });
-    return { secret, enabled: true, cardCount: cards.length };
+    return { secret, enabled: true };
   },
 
   // 管理員：已綁定卡片列表（含座號、姓名）

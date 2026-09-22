@@ -20,7 +20,7 @@ const char* WIFI_SSID     = "你的WiFi名稱";
 const char* WIFI_PASSWORD = "你的WiFi密碼";
 
 // 你的 Vercel 網址（例如 https://orderingmaster2.vercel.app）
-const char* SERVER_URL    = "https://your-app.vercel.app";
+const char* SERVER_URL    = "https://ordering-master-pro.vercel.app";
 
 // 裝置密鑰：登入管理後台 → 「RFID」分頁 → 複製「裝置密鑰」貼到這裡
 const char* SECRET        = "在此貼上裝置密鑰";

@@ -509,12 +509,18 @@ async function renderAdminRfid(content) {
   stopRfidPolling();
   let cfg = { secret: '' };
   let cards = [];
+  let cardHint = '';
   try {
-    const [config, cardData] = await Promise.all([api('rfidGetConfig'), api('rfidListCards')]);
-    cfg = config; cards = cardData.cards || [];
+    cfg = await api('rfidGetConfig');
   } catch (error) {
     content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
     return;
+  }
+  try {
+    const cardData = await api('rfidListCards');
+    cards = cardData.cards || [];
+  } catch (error) {
+    cardHint = error.message;
   }
 
   content.innerHTML = `
@@ -544,6 +550,7 @@ async function renderAdminRfid(content) {
           <h3 class="font-serif text-lg font-black">已綁定卡片 <span class="text-sm font-normal text-slate-400">（${cards.length} 張）</span></h3>
           <button data-action="rfid-refresh-cards" class="rounded-lg bg-mist px-3 py-1.5 text-xs font-bold text-ledger">重新整理</button>
         </div>
+        ${cardHint ? `<p class="mt-2 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-600">無法讀取卡片資料：${escapeHtml(cardHint)}。若尚未建立 RFID 資料表，請先於 Supabase SQL Editor 執行 supabase/migration_rfid.sql。</p>` : ''}
         <div class="mt-2 divide-y divide-dashed divide-ledger/10">
           ${cards.length ? cards.map((card) => `
             <div class="flex items-center justify-between py-2.5">
