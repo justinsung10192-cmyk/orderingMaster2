@@ -34,8 +34,10 @@ constexpr uint8_t RST_PIN  = 0;   // RST
 constexpr int    BUZZER_PIN = -1; // 蜂鳴器（選用，未接保持 -1；接了建議 GPIO5/D1）
 constexpr uint8_t LED_PIN = 2;    // 內建藍色 LED（低電位點亮）
 
-// 設定鈕：開機時按住 GPIO5(D1) 接 GND → 強制進入設定模式；改成 -1 停用
-constexpr int CONFIG_PIN = 5;
+// 設定鈕：開機時按住 GPIO5(D1) 接 GND → 強制進入設定模式
+// 預設「停用」（-1）：浮接腳位在某些板子會誤判成 LOW，導致每次開機都進 AP 而不連線。
+// 若要使用，改成 5，並把 D1(GPIO5) 經一個按鈕接到 GND（按下=LOW=進設定）。
+constexpr int CONFIG_PIN = -1;
 
 // ====== 設定儲存（EEPROM）======
 struct Config {
@@ -87,7 +89,7 @@ String configPage() {
   h += "<title>RFID 讀卡機設定</title></head>";
   h += "<body style='font-family:sans-serif;max-width:480px;margin:auto;padding:16px'>";
   h += "<h2>訂餐通 RFID 讀卡機設定</h2>";
-  h += "<form action='/save' method='post'>";
+  h += "<form action='/save' method='get'>";
   h += "<p>WiFi SSID<br><input name='ssid' value='" + String(cfg.ssid) + "' style='width:100%;padding:8px;box-sizing:border-box'></p>";
   h += "<p>WiFi 密碼<br><input name='pass' value='" + String(cfg.pass) + "' style='width:100%;padding:8px;box-sizing:border-box'></p>";
   h += "<p>伺服器網址（Vercel）<br><input name='server' value='" + String(cfg.server) + "' style='width:100%;padding:8px;box-sizing:border-box'></p>";
@@ -188,6 +190,7 @@ void setup() {
   if (BUZZER_PIN >= 0) pinMode(BUZZER_PIN, OUTPUT);
 
   loadConfig();
+  Serial.println("[RFID] 已載入設定：SSID=" + String(cfg.ssid) + " / station=" + String(cfg.station) + " / server=" + String(cfg.server));
 
   // 設定鈕：開機按住 → 強制進入設定模式
   bool forceAp = false;

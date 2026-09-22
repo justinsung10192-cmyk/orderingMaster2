@@ -1244,6 +1244,8 @@ async function onClick(event) {
     refreshBoot()
       .then(() => {
         if (state.view !== nav || !state.user) return;
+        // 管理/設定分頁有自己的資料來源，不因 bootstrap 重繪（避免子分頁被重置）
+        if (state.view === 'admin' || state.view === 'settings') return;
         if (JSON.stringify(state.boot) !== bootSig) renderView();
       })
       .catch(() => {});
