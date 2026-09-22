@@ -1117,25 +1117,32 @@ function openScanner() {
 
 // 原生掃描器：逐幀同時掃「正常＋反相」兩種畫面，任一角度都能抓到
 async function startNativeScanner(onSuccess) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false,
-  });
-  const readerEl = $('#qr-reader');
+  let stream = null;
+  const stopStream = () => { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+  } catch (_) { throw new Error('no-camera'); }
+
+  let detector = null;
+  try { detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (_) {}
+  if (!detector) { stopStream(); throw new Error('no-detector'); }
+
   const video = document.createElement('video');
   video.setAttribute('playsinline', 'true');
-  video.setAttribute('muted', 'true');
   video.setAttribute('autoplay', 'true');
+  video.muted = true;
   video.srcObject = stream;
+
+  let stopped = false;
+  state.scanner = { stop: async () => { stopped = true; stopStream(); } };
+
+  const readerEl = $('#qr-reader');
   if (readerEl) { readerEl.innerHTML = ''; readerEl.appendChild(video); video.style.width = '100%'; video.style.maxHeight = '56vh'; video.style.objectFit = 'cover'; }
-  await video.play();
+
+  try { await video.play(); } catch (_) { state.scanner = null; stopStream(); throw new Error('play-fail'); }
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-
-  let stopped = false;
-  state.scanner = { stop: async () => { stopped = true; stream.getTracks().forEach((t) => t.stop()); } };
 
   let lastTick = 0;
   async function scanOnce() {
@@ -1185,8 +1192,8 @@ function startHtml5Scanner() {
   loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js').then(() => {
     state.scanner = new window.Html5Qrcode('qr-reader');
     state.scanner.start(
-      { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-      { fps: 20, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.78); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, disableFlip: false, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
+      { facingMode: { ideal: 'environment' } },
+      { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.72); return { width: s, height: s }; }, aspectRatio: 1.0, rememberLastUsedCamera: true, disableFlip: false, formatsToSupport: [window.Html5QrcodeSupportedFormats && window.Html5QrcodeSupportedFormats.QR_CODE].filter(Boolean) },
       onScanSuccess,
       () => {},
     ).catch(() => {
