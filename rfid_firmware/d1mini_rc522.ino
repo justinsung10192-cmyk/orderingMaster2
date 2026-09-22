@@ -31,7 +31,7 @@ const char* DEFAULT_STATION  = "demo";
 // SDA->GPIO15(D8), SCK->GPIO14(D5), MOSI->GPIO13(D7), MISO->GPIO12(D6), RST->GPIO0(D3)
 constexpr uint8_t SS_PIN   = 15;  // SDA
 constexpr uint8_t RST_PIN  = 0;   // RST
-constexpr int    BUZZER_PIN = -1; // 蜂鳴器（選用，未接保持 -1；接了建議 GPIO5/D1）
+constexpr int    BUZZER_PIN = 4; // 蜂鳴器（選用，未接保持 -1；接了建議 GPIO5/D1）
 constexpr uint8_t LED_PIN = 2;    // 內建藍色 LED（低電位點亮）
 
 // 設定鈕：開機時按住 GPIO5(D1) 接 GND → 強制進入設定模式
@@ -150,17 +150,27 @@ String readUidHex() {
   return uid;
 }
 
-// 把動作 POST 到後端，回傳伺服器回應字串（失敗回傳空字串）
-String postAction(const String& action, const String& uid) {
-  if (WiFi.status() != WL_CONNECTED) return "";
+// 從 SERVER_URL 取出主機名（例如 https://a.vercel.app → a.vercel.app）
+String extractHost(const String& url) {
+  String u = url;
+  u.replace("https://", "");
+  u.replace("http://", "");
+  int slash = u.indexOf('/');
+  if (slash >= 0) u = u.substring(0, slash);
+  return u;
+}
+
+// 感應即回報：送出 HTTP 請求後立刻斷線，不等伺服器回應（fire-and-forget）
+void fireAndForget(const String& action, const String& uid) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  String host = extractHost(cfg.server);
+  if (host.length() == 0) return;
 
   WiFiClientSecure client;
-  client.setInsecure();          // 略過憑證驗證（簡單可靠）
-  client.setTimeout(10000);
-
-  HTTPClient http;
-  if (!http.begin(client, String(cfg.server) + "/api/gas")) return "";
-  http.addHeader("Content-Type", "application/json");
+  client.setInsecure();
+  client.setTimeout(3000);
+  if (!client.connect(host.c_str(), 443)) return;
 
   String body = "{\"action\":\"" + action + "\",\"data\":{";
   body += "\"uid\":\"" + uid + "\",";
@@ -168,11 +178,17 @@ String postAction(const String& action, const String& uid) {
   body += "\"secret\":\"" + String(cfg.secret) + "\"";
   body += "}}";
 
-  int code = http.POST(body);
-  String resp = http.getString();
-  http.end();
+  String req = "POST /api/gas HTTP/1.1\r\n";
+  req += "Host: " + host + "\r\n";
+  req += "Content-Type: application/json\r\n";
+  req += "Content-Length: " + String(body.length()) + "\r\n";
+  req += "Connection: close\r\n\r\n";
+  req += body;
 
-  return (code == 200) ? resp : "";
+  client.print(req);
+  client.flush();
+  delay(10);
+  client.stop();
 }
 
 // 每 30 秒送一次心跳（僅在閒置時，避免干擾感應）
@@ -180,7 +196,7 @@ void heartbeatTick() {
   if (millis() - lastScanMs < 10000) return;
   if (millis() - lastHeartbeatMs < 30000) return;
   lastHeartbeatMs = millis();
-  postAction("rfidHeartbeat", "");
+  fireAndForget("rfidHeartbeat", "");
 }
 
 void setup() {
@@ -257,28 +273,10 @@ void loop() {
     cardReported = true;
     lastScanMs = millis();
     Serial.println("[RFID] 感應到卡片 UID: " + uid);
-    blinkLed(1, 60); // 立即回饋「已讀到」
-
-    String resp = postAction("rfidScan", uid);
-    if (resp.length() == 0) {
-      Serial.println("[RFID] 伺服器連線失敗，請檢查網路或 SERVER_URL。");
-      blinkLed(3, 120);
-      beep(1, 400);
-    } else {
-      Serial.println("[RFID] 回應: " + resp);
-      if (resp.indexOf("\"registered\"") >= 0) {
-        blinkLed(2, 100);        // 註冊成功：閃 2 下
-        beep(2, 100);
-      } else if (resp.indexOf("\"scanned\"") >= 0) {
-        blinkLed(1, 150);        // 掃描成功：閃 1 下
-        beep(1, 150);
-      } else if (resp.indexOf("\"duplicate\"") >= 0) {
-        // 後端去抖：卡未移走，不提示
-      } else {
-        blinkLed(3, 120);        // 錯誤（未綁定/密鑰錯誤）：閃 3 下
-        beep(1, 400);
-      }
-    }
+    // 立即回饋，然後送出（不等伺服器回應封包）
+    blinkLed(1, 100);
+    beep(1, 80);
+    fireAndForget("rfidScan", uid);
   }
 
   delay(60);
