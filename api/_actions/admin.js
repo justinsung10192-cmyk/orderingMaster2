@@ -22,24 +22,20 @@ async function computeDuty(classId, date) {
     const userById = new Map(users.map((u) => [String(u.id), u]));
     return manual.map((m) => { const u = userById.get(String(m.user_id)); return { id: sid(u?.id), seatNo: u?.seat_no || '', name: u?.student_name || '已刪除帳號', manual: true }; });
   }
-  // 假日不排值日
-  const holidays = await listRows('holidays', { classId });
+  // 假日不排值日（holidays / users / 最早場次三者互不依賴，並行查詢以減少往返）
+  const [holidays, allUsers, firstSessionRes] = await Promise.all([
+    listRows('holidays', { classId }),
+    listRows('users', { classId }),
+    supabase.from('sessions').select('order_date').eq('class_id', classId).eq('is_deleted', false).order('order_date', { ascending: true }).limit(1),
+  ]);
   const holidayDates = new Set(holidays.map((h) => h.holiday_date));
   if (holidayDates.has(date)) return [];
-  const allUsers = await listRows('users', { classId });
   const eligible = allUsers
     .filter((user) => !user.is_disabled && !user.duty_exempt)
     .sort((a, b) => num(a.seat_no) - num(b.seat_no));
   if (!eligible.length) return [];
   // 參考日 = 最早場次日期（第一個上課日，由 1、2 號開始）
-  const { data: firstSessions, error: fsErr } = await supabase
-    .from('sessions')
-    .select('order_date')
-    .eq('class_id', classId)
-    .eq('is_deleted', false)
-    .order('order_date', { ascending: true })
-    .limit(1);
-  const refDate = (!fsErr && firstSessions?.[0]?.order_date) || date;
+  const refDate = (!firstSessionRes?.error && firstSessionRes?.data?.[0]?.order_date) || date;
   let dayIndex = 0;
   const d = new Date(`${refDate}T00:00:00`);
   const target = new Date(`${date}T00:00:00`);

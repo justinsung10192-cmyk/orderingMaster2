@@ -122,8 +122,12 @@ export function computeOrderItems(menuItems, selections) {
 }
 
 export async function loadSessionWithMenu(session) {
-  const store = await findOne('stores', { id: session.store_id }, session.class_id);
-  const menuItems = (await listMenuItemsForStore(session.class_id, session.store_id, { includeInactive: false }))
+  // 並行：店家與菜單互不依賴
+  const [store, rawMenuItems] = await Promise.all([
+    findOne('stores', { id: session.store_id }, session.class_id),
+    listMenuItemsForStore(session.class_id, session.store_id, { includeInactive: false }),
+  ]);
+  const menuItems = rawMenuItems
     .filter((item) => !item.menu_date || item.menu_date === '1970-01-01' || item.menu_date === session.order_date);
   return {
     session,
@@ -178,18 +182,16 @@ export async function loadOpenSessions(user, { pureBalanceMode = false } = {}) {
   if (error) throw new Error('讀取場次失敗。');
   const sessions = (rawSessions || []).filter((s) => !s.is_deleted);
 
-  const orders = sessions.length
-    ? await listRowsIn('orders', 'session_id', sessions.map((session) => session.id), { classId })
-    : [];
-  const userOrders = orders.filter((order) => String(order.user_id) === String(user.id));
-  const orderBySession = new Map(userOrders.map((order) => [String(order.session_id), order]));
-
-  // 批次載入店家與菜單（避免 N+1，加速菜單顯示）
+  // 批次載入訂單、店家、菜單（三者互不依賴，一次並行，避免 N+1 且減少往返）
   const storeIds = [...new Set(sessions.map((session) => session.store_id))];
-  const [stores, allMenuItems] = await Promise.all([
+  const sessionIds = sessions.map((session) => session.id);
+  const [orders, stores, allMenuItems] = await Promise.all([
+    sessionIds.length ? listRowsIn('orders', 'session_id', sessionIds, { classId }) : [],
     storeIds.length ? listRowsIn('stores', 'id', storeIds, { classId }) : [],
     storeIds.length ? listMenuItemsForStores(classId, storeIds, { includeInactive: false }) : [],
   ]);
+  const userOrders = orders.filter((order) => String(order.user_id) === String(user.id));
+  const orderBySession = new Map(userOrders.map((order) => [String(order.session_id), order]));
   const storeById = new Map(stores.map((store) => [String(store.id), store]));
   const menuByStore = new Map();
   for (const item of allMenuItems) {

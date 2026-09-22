@@ -138,10 +138,13 @@ export const actions = {
     const session = await findOne('sessions', { id: Number(data.sessionId) }, ctx.classId);
     if (!session) throw appError('NOT_FOUND', '找不到場次。');
     if (!session.is_open && ctx.user.role !== 'Admin') throw appError('CLOSED', '此場次尚未開放。');
-    const classRow = await getClass(ctx.classId);
+    // 並行：班級設定、店家＋菜單、既有訂單（三組互不依賴，減少往返）
+    const [classRow, menuInfo, existingOrder] = await Promise.all([
+      getClass(ctx.classId),
+      loadSessionWithMenu(session),
+      findOne('orders', { session_id: session.id, user_id: ctx.user.id }, ctx.classId),
+    ]);
     const pureBalanceMode = Boolean(classRow.pure_balance_mode);
-    const { storeName, menuItems } = await loadSessionWithMenu(session);
-    const existingOrder = await findOne('orders', { session_id: session.id, user_id: ctx.user.id }, ctx.classId);
-    return publicSession(session, storeName, menuItems, existingOrder, pureBalanceMode, ctx.user.wallet_balance);
+    return publicSession(session, menuInfo.storeName, menuInfo.menuItems, existingOrder, pureBalanceMode, ctx.user.wallet_balance);
   },
 };
