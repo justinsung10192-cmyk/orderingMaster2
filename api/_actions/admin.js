@@ -392,7 +392,7 @@ export const actions = {
   async adminResetAllData(_data, ctx) {
     const classId = ctx.classId;
     // 依外鍵順序清除（先 orders 再 sessions，避免 sessions.store_id 被擋）
-    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments', 'push_subscriptions', 'auth_tokens']) {
+    for (const table of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments', 'push_subscriptions', 'auth_tokens', 'rfid_cards', 'rfid_events', 'rfid_pending']) {
       await deleteRows(table, { class_id: classId });
     }
     await deleteRows('changelog', { class_id: '' });
@@ -410,7 +410,7 @@ export const actions = {
 
   // 匯出完整資料備份（JSON）
   async adminExportBackup(_data, ctx) {
-    const tables = ['classes', 'users', 'stores', 'menu_items', 'sessions', 'orders', 'transactions', 'verification_records', 'votes', 'holidays', 'recurring_menu', 'app_settings', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments'];
+    const tables = ['classes', 'users', 'stores', 'menu_items', 'sessions', 'orders', 'transactions', 'verification_records', 'votes', 'holidays', 'recurring_menu', 'app_settings', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'duty_assignments', 'rfid_cards', 'rfid_events'];
     const dump = {};
     for (const table of tables) {
       const { data, error } = await supabase.from(table).select('*').eq('class_id', ctx.classId);
@@ -473,7 +473,7 @@ export const actions = {
     }
 
     // 2) 清空可重建表
-    for (const t of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'duty_assignments', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations']) {
+    for (const t of ['orders', 'transactions', 'verification_records', 'votes', 'sessions', 'holidays', 'menu_items', 'recurring_menu', 'stores', 'duty_assignments', 'calendar_events', 'calendar_event_logs', 'custom_debts', 'leave_requests', 'menu_recommendations', 'rfid_cards', 'rfid_events']) {
       await deleteRows(t, { class_id: classId });
     }
     await deleteRows('changelog', { class_id: '' });
@@ -527,6 +527,10 @@ export const actions = {
     }
     for (const row of tables.duty_assignments.filter((r) => r.class_id === classId)) {
       await supabase.from('duty_assignments').insert({ class_id: classId, duty_date: row.duty_date, user_id: row.user_id });
+    }
+    // 9) RFID 卡片綁定
+    for (const row of (tables.rfid_cards || []).filter((r) => r.class_id === classId)) {
+      await supabase.from('rfid_cards').insert({ class_id: classId, uid: row.uid, user_id: row.user_id, registered_at: row.registered_at });
     }
     for (const row of tables.changelog || []) {
       await supabase.from('changelog').insert({ class_id: '', version: row.version, title: row.title, body: row.body, created_at: row.created_at });

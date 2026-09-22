@@ -54,6 +54,9 @@ const TABLES = [
   'leave_requests',
   'menu_recommendations',
   'changelog',
+  'rfid_cards',
+  'rfid_events',
+  'rfid_pending',
 ];
 
 // 分頁讀取整表（突破 PostgREST 預設 1000 列上限，確保「完整」）

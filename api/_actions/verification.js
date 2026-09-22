@@ -6,7 +6,7 @@ import { sendPushToUser } from '../_lib/push.js';
 
 const VERIFY_MINUTES = 5;
 
-async function resolveContext(classId, userId) {
+export async function resolveContext(classId, userId) {
   const [student, allOrdersRaw, allStores] = await Promise.all([
     findOne('users', { id: Number(userId) }, classId),
     listRows('orders', { classId, filters: { user_id: Number(userId) } }),

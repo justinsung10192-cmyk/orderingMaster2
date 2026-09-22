@@ -1486,6 +1486,12 @@ async function handleAction(action, target) {
     // 管理員 - 核銷
     case 'open-scanner': (await getAdmin()).openScanner(); break;
     case 'scan-photo': (await getAdmin()).scanPhoto(); break;
+    // 管理員 - RFID
+    case 'rfid-toggle-scan': (await getAdmin()).rfidToggleScan(); break;
+    case 'rfid-start-register': (await getAdmin()).rfidStartRegister(); break;
+    case 'rfid-remove-card': (await getAdmin()).rfidRemoveCard(target.getAttribute('data-uid')); break;
+    case 'rfid-copy-secret': (await getAdmin()).rfidCopySecret(); break;
+    case 'rfid-refresh-cards': (await getAdmin()).rfidRefreshCards(); break;
     case 'pin-input': {
       promptModal('輸入 PIN 碼', [{ name: 'pin', label: '6 位數 PIN', type: 'text' }], async (v) => { const r = await api('adminResolvePin', { pin: v.pin }); closeModal(); (await getAdmin()).renderVerifyResult(r); });
       break;

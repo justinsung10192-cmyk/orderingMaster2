@@ -1,0 +1,71 @@
+# 訂餐通 RFID 讀卡機（D1 Mini + RC522）
+
+感應卡片 → 等同於「掃碼核銷」。學生把卡片靠近讀卡機後，管理者的手機（「RFID」分頁）會自動顯示該生座號、今日餐點、欠費與餘額。
+
+## 硬體
+
+- D1 Mini（ESP8266）
+- RC522（MFRC522，13.56MHz）＋ MIFARE 卡片/鑰匙圈
+
+## 接線（預設，可改韌體常數）
+
+| RC522 | D1 Mini | GPIO |
+|-------|---------|------|
+| SDA   | D8      | GPIO15 |
+| SCK   | D5      | GPIO14 |
+| MOSI  | D7      | GPIO13 |
+| MISO  | D6      | GPIO12 |
+| RST   | D3      | GPIO0  |
+| 3.3V  | 3V3     | —      |
+| GND   | G       | —      |
+
+> 注意：RC522 請用 **3.3V** 供電，不要接 5V。
+
+## 燒錄步驟
+
+1. Arduino IDE → 函式庫管理員安裝 `MFRC522`。
+2. 開發板管理員安裝 `ESP8266` 套件，板子選 `WeMos D1 R2 & mini`。
+3. 開啟 `d1mini_rc522.ino`，修改最上方四個常數：
+   - `WIFI_SSID` / `WIFI_PASSWORD`：學校 WiFi。
+   - `SERVER_URL`：你的 Vercel 網址（例如 `https://orderingmaster2.vercel.app`）。
+   - `SECRET`：登入管理後台 →「RFID」分頁 → 複製「裝置密鑰」貼上。
+   - `STATION_ID`：班級識別碼，預設 `demo`。
+4. 上傳，開啟序列監視器（115200）確認 `WiFi 已連線`。
+
+## 使用流程
+
+### 註冊卡片
+1. 手機管理後台 →「RFID」→ 輸入座號（如 `05`）→「開始註冊」。
+2. 把**新卡片**靠近讀卡機。
+3. 讀卡機閃 2 下（註冊成功），手機自動顯示「卡片已綁定到座號 05」。
+
+### 感應掃描（核銷）
+1. 手機管理後台 →「RFID」→「▶ 開始感應」。
+2. 學生把**已綁定的卡片**靠近讀卡機。
+3. 手機自動顯示該生座號、今日餐點（可標記取餐）、欠費（可繳費）、餘額（可儲值）——與掃碼結果完全相同。
+
+### 提示燈號
+- 閃 1 下：掃描成功（已綁定卡片）
+- 閃 2 下：註冊成功
+- 閃 3 下：失敗（未綁定卡片 / 密鑰錯誤 / 連線失敗）
+
+## 後端流程
+
+```
+D1 Mini 讀到 UID
+  └─ POST { action:"rfidScan", data:{ uid, stationId, secret } } → /api/gas
+       ├─ 有「待註冊」→ 綁定 UID → 座號，記錄 registered
+       ├─ 已綁定卡片 → 記錄 scan
+       └─ 未綁定 → 記錄 unknown（回報錯誤）
+
+手機「RFID」分頁
+  └─ 每 1.5 秒輪詢 rfidPoll → 顯示最新感應事件與該生完整資訊
+```
+
+## 資料表（migration_rfid.sql，純新增）
+
+- `rfid_cards`：卡片 UID → 使用者（座號）綁定
+- `rfid_events`：感應事件紀錄
+- `rfid_pending`：待註冊狀態（每班一筆）
+
+> 部署前請先在 Supabase SQL Editor 執行 `supabase/migration_rfid.sql`。

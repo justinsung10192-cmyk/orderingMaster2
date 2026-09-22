@@ -21,6 +21,7 @@ function renderAdminView(root) {
     { id: 'daily', label: '每日菜單' },
     { id: 'schedule', label: '排程' },
     { id: 'verify', label: '核銷' },
+    { id: 'rfid', label: 'RFID' },
     { id: 'users', label: '帳號' },
     { id: 'activity', label: '歷程' },
     { id: 'leave', label: '請假' },
@@ -46,6 +47,7 @@ function renderAdminView(root) {
 }
 
 function renderAdminTab() {
+  if (state.adminTab !== 'rfid') stopRfidPolling();
   const content = $('#admin-content');
   if (!content) return;
   // 更新分頁高亮（不整頁重繪）
@@ -64,6 +66,7 @@ function renderAdminTab() {
     daily: renderAdminDailyMenu,
     schedule: renderAdminSchedule,
     verify: renderAdminVerify,
+    rfid: renderAdminRfid,
     users: renderAdminUsers,
     activity: renderAdminActivity,
     leave: renderAdminLeave,
@@ -499,6 +502,161 @@ function renderAdminVerify(content) {
       </div>
       ${state.admin.lastVerify ? verifyResultHtml(state.admin.lastVerify) : ''}
     </div>`;
+}
+
+/* ----- RFID ----- */
+async function renderAdminRfid(content) {
+  stopRfidPolling();
+  let cfg = { secret: '' };
+  let cards = [];
+  try {
+    const [config, cardData] = await Promise.all([api('rfidGetConfig'), api('rfidListCards')]);
+    cfg = config; cards = cardData.cards || [];
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="space-y-4">
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <div class="flex items-center justify-between">
+          <div><p class="text-xs font-bold tracking-[.12em] text-slate-400">RFID SCANNER</p><h3 class="font-serif text-lg font-black">感應掃描（等同掃碼）</h3></div>
+          <button data-action="rfid-toggle-scan" class="rounded-xl bg-ledger px-4 py-2.5 text-xs font-bold text-white">▶ 開始感應</button>
+        </div>
+        <p class="mt-2 text-xs text-slate-400">開啟後請學生將卡片靠近 RC522 讀卡機，掃描結果會自動顯示在下方。</p>
+        <div id="rfid-scan-result" class="mt-3"></div>
+      </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <p class="text-xs font-bold tracking-[.12em] text-slate-400">CARD REGISTRATION</p>
+        <h3 class="font-serif text-lg font-black">註冊卡片</h3>
+        <p class="mt-1 text-xs text-slate-400">輸入座號後按「開始註冊」，再把新卡片靠近讀卡機即可完成綁定。</p>
+        <div class="mt-3 flex gap-2">
+          <input id="rfid-register-seat" inputmode="numeric" maxlength="3" placeholder="座號，如 05" class="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-center text-lg font-black outline-none focus:border-ledger" />
+          <button data-action="rfid-start-register" class="rounded-xl bg-stamp px-4 text-xs font-bold text-white">開始註冊</button>
+        </div>
+        <div id="rfid-register-status" class="mt-2 text-xs text-slate-400"></div>
+      </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <div class="flex items-center justify-between">
+          <h3 class="font-serif text-lg font-black">已綁定卡片 <span class="text-sm font-normal text-slate-400">（${cards.length} 張）</span></h3>
+          <button data-action="rfid-refresh-cards" class="rounded-lg bg-mist px-3 py-1.5 text-xs font-bold text-ledger">重新整理</button>
+        </div>
+        <div class="mt-2 divide-y divide-dashed divide-ledger/10">
+          ${cards.length ? cards.map((card) => `
+            <div class="flex items-center justify-between py-2.5">
+              <div class="flex items-center gap-3">
+                <span class="grid h-9 w-9 place-items-center rounded-full bg-mist text-sm font-black text-ledger">${escapeHtml(card.seatNo || '?')}</span>
+                <div><p class="text-sm font-bold text-ledger">${escapeHtml(card.name)}</p><p class="font-mono text-[11px] text-slate-400">UID ${escapeHtml(card.uid)}</p></div>
+              </div>
+              <button data-action="rfid-remove-card" data-uid="${escapeHtml(card.uid)}" class="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-500">移除</button>
+            </div>`).join('') : '<p class="py-6 text-center text-sm text-slate-400">尚未綁定任何卡片。</p>'}
+        </div>
+      </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-paper ring-1 ring-ledger/5">
+        <p class="text-xs font-bold tracking-[.12em] text-slate-400">DEVICE SECRET</p>
+        <h3 class="font-serif text-lg font-black">裝置密鑰（D1 Mini 韌體用）</h3>
+        <div class="mt-2 flex items-center gap-2">
+          <code id="rfid-secret" class="min-w-0 flex-1 break-all rounded-xl bg-mist px-3 py-2 font-mono text-xs">${escapeHtml(cfg.secret)}</code>
+          <button data-action="rfid-copy-secret" class="rounded-xl bg-ledger px-3 py-2 text-xs font-bold text-white">複製</button>
+        </div>
+        <p class="mt-2 text-[11px] leading-4 text-slate-400">把密鑰填入 D1 Mini 韌體常數 SECRET，並將 SERVER_URL 設為你的 Vercel 網址。</p>
+      </div>
+    </div>`;
+}
+
+let rfidTimer = null;
+let rfidMode = null; // 'scan' | 'register'
+let rfidLastId = 0;
+
+function stopRfidPolling() {
+  if (rfidTimer) { clearInterval(rfidTimer); rfidTimer = null; }
+  rfidMode = null;
+}
+
+async function rfidToggleScan() {
+  if (rfidMode === 'scan') {
+    stopRfidPolling();
+    toast('已停止感應。', 'info');
+    renderAdminRfid($('#admin-content'));
+    return;
+  }
+  stopRfidPolling();
+  rfidMode = 'scan';
+  rfidLastId = 0;
+  const res = $('#rfid-scan-result');
+  if (res) res.innerHTML = '<p class="rounded-xl bg-mist px-3 py-4 text-center text-sm text-slate-400">感應掃描已開啟，請學生將卡片靠近讀卡機…</p>';
+  // 先建立基準（忽略舊事件），之後只處理「新」感應
+  try { const r = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r.lastId) || 0; } catch (_) {}
+  rfidTimer = setInterval(() => rfidTick(), 1500);
+  toast('感應掃描已開啟。', 'success');
+}
+
+async function rfidTick() {
+  try {
+    const r = await api('rfidPoll', { sinceId: rfidLastId });
+    if (!r || !r.events) return;
+    rfidLastId = Number(r.lastId) || rfidLastId;
+    for (const ev of r.events) {
+      if (rfidMode === 'scan' && ev.kind === 'scan' && ev.context) {
+        const res = $('#rfid-scan-result');
+        if (res) res.innerHTML = verifyResultHtml({ ...ev.context, intent: 'all' });
+        toast(`感應成功：${ev.seatNo} ${ev.studentName}`, 'success');
+      } else if (rfidMode === 'register' && ev.kind === 'registered') {
+        stopRfidPolling();
+        toast(`卡片 ${ev.uid} 已綁定到座號 ${ev.seatNo}`, 'success');
+        renderAdminRfid($('#admin-content'));
+        return;
+      }
+    }
+  } catch (_) { /* 輪詢失敗忽略 */ }
+}
+
+async function rfidStartRegister() {
+  const seatInput = $('#rfid-register-seat');
+  const seatNo = seatInput ? seatInput.value.trim() : '';
+  if (!seatNo) return toast('請先輸入座號。', 'error');
+  try {
+    const r = await api('rfidStartRegister', { seatNo });
+    stopRfidPolling();
+    rfidMode = 'register';
+    rfidLastId = 0;
+    const status = $('#rfid-register-status');
+    if (status) status.innerHTML = `<span class="font-bold text-stamp">註冊中：請將新卡片靠近讀卡機（座號 ${escapeHtml(r.seatNo)} ${escapeHtml(r.name)}）…</span>`;
+    // 先建立基準（忽略舊事件）
+    try { const r0 = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r0.lastId) || 0; } catch (_) {}
+    rfidTimer = setInterval(() => rfidTick(), 1500);
+    toast('註冊模式已開啟，請感應卡片。', 'success');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function rfidRemoveCard(uid) {
+  openConfirm('移除卡片', `確定要移除卡片 ${uid} 的綁定嗎？移除後該卡片將無法感應。`, async () => {
+    await api('rfidUnregisterCard', { uid });
+    toast('卡片已移除。', 'success');
+    renderAdminRfid($('#admin-content'));
+  });
+}
+
+async function rfidCopySecret() {
+  const el = $('#rfid-secret');
+  const text = el ? el.textContent : '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('密鑰已複製。', 'success');
+  } catch (_) {
+    toast('複製失敗，請長按手動複製。', 'error');
+  }
+}
+
+async function rfidRefreshCards() {
+  renderAdminRfid($('#admin-content'));
 }
 
 /* ----- 帳號 ----- */
@@ -1915,3 +2073,8 @@ export { saveItem };
 export { saveAiItems };
 export { renderAiList };
 export { renderMonthlyList };
+export { rfidToggleScan };
+export { rfidStartRegister };
+export { rfidRemoveCard };
+export { rfidCopySecret };
+export { rfidRefreshCards };

@@ -14,6 +14,7 @@ import { actions as aiActions } from './_actions/ai.js';
 import { actions as pushActions } from './_actions/push.js';
 import { actions as calendarActions } from './_actions/calendar.js';
 import { actions as featuresActions } from './_actions/features.js';
+import { actions as rfidActions } from './_actions/rfid.js';
 
 const HANDLERS = {
   ...authActions,
@@ -28,9 +29,10 @@ const HANDLERS = {
   ...pushActions,
   ...calendarActions,
   ...featuresActions,
+  ...rfidActions,
 };
 
-const PUBLIC = new Set(['getPublicConfig', 'login']);
+const PUBLIC = new Set(['getPublicConfig', 'login', 'rfidScan']);
 
 // 師長帳號：只能使用行事曆與個人設定（不可訂餐、投票、錢包、請假等）
 const TEACHER_ALLOWED = new Set([
@@ -108,6 +110,12 @@ const ADMIN = new Set([
   'adminDeleteRecommendation',
   'adminAddChangelog',
   'adminDeleteChangelog',
+  'rfidGetConfig',
+  'rfidListCards',
+  'rfidStartRegister',
+  'rfidCancelRegister',
+  'rfidUnregisterCard',
+  'rfidPoll',
 ]);
 
 export const config = { api: { bodyParser: false } };
