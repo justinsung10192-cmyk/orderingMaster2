@@ -158,6 +158,8 @@ async function bootstrap() {
       state.user = state.boot.user;
       finishBootProgress();
       render();
+      // 管理員：背景預先載入管理後台 chunk，點「管理」時秒開
+      if (state.user.role === 'Admin') getAdmin();
       return;
     } catch (_) {
       state.token = '';
@@ -373,7 +375,13 @@ function renderView() {
   if (state.view === 'vote') return renderVoteView(view);
   if (state.view === 'calendar') return renderCalendarView(view);
   if (state.view === 'wallet') return renderWalletView(view);
-  if (state.view === 'admin') { view.innerHTML = '<p class="p-8 text-center text-sm text-slate-400">管理後台載入中…</p>'; getAdmin().then((m) => m.renderAdminView(view)); return; }
+  if (state.view === 'admin') {
+    // 已渲染過管理後台就只更新內容，避免「載入中」閃爍
+    if ($('#admin-content')) { getAdmin().then((m) => m.renderAdminTab()); return; }
+    view.innerHTML = '<p class="p-8 text-center text-sm text-slate-400">管理後台載入中…</p>';
+    getAdmin().then((m) => m.renderAdminView(view));
+    return;
+  }
   if (state.view === 'settings') return renderSettingsView(view);
 }
 
@@ -1230,6 +1238,8 @@ async function onClick(event) {
     state.view = nav;
     if (nav === 'admin') state.adminTab = 'dashboard';
     render();
+    renderView();
+    // 背景更新 bootstrap（不阻塞畫面；畫面先以快取渲染）
     refreshBoot()
       .then(() => { if (state.view === nav && state.user) renderView(); })
       .catch(() => {});
@@ -1237,7 +1247,7 @@ async function onClick(event) {
   }
   if (adminTab) {
     state.adminTab = adminTab;
-    render();
+    (await getAdmin()).renderAdminTab();
     return;
   }
   if (toggleWeek) {

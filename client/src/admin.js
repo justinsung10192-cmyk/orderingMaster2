@@ -48,6 +48,16 @@ function renderAdminView(root) {
 function renderAdminTab() {
   const content = $('#admin-content');
   if (!content) return;
+  // 更新分頁高亮（不整頁重繪）
+  document.querySelectorAll('[data-admin-tab]').forEach((btn) => {
+    const active = btn.getAttribute('data-admin-tab') === state.adminTab;
+    btn.classList.toggle('bg-ledger', active);
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('bg-white', !active);
+    btn.classList.toggle('text-ledger', !active);
+    btn.classList.toggle('ring-1', !active);
+    btn.classList.toggle('ring-ledger/10', !active);
+  });
   const handlers = {
     dashboard: renderAdminDashboard,
     menu: renderAdminMenu,
@@ -70,11 +80,30 @@ function renderAdminTab() {
 
 /* ----- 總覽 ----- */
 async function renderAdminDashboard(content) {
+  // 快取：同一天已有資料就先渲染（秒開），再背景更新
+  const cached = state.admin.dashboard;
+  if (cached && cached.date === state.admin.dashboardDate) {
+    paintDashboard(content, cached);
+    api('adminGetDashboard', { date: state.admin.dashboardDate })
+      .then((data) => {
+        state.admin.dashboard = data;
+        if (state.view === 'admin' && state.adminTab === 'dashboard') paintDashboard($('#admin-content'), data);
+      })
+      .catch(() => {});
+    return;
+  }
   try {
     const data = await api('adminGetDashboard', { date: state.admin.dashboardDate });
     state.admin.dashboard = data;
-    const totals = data.totals;
-    content.innerHTML = `
+    paintDashboard(content, data);
+  } catch (error) {
+    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function paintDashboard(content, data) {
+  const totals = data.totals;
+  content.innerHTML = `
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
@@ -178,14 +207,11 @@ async function renderAdminDashboard(content) {
               </div>`).join('')}
           </div>` : ''}
       </div>`;
-    const dateInput = $('#dashboard-date');
-    if (dateInput) dateInput.addEventListener('change', (event) => {
-      state.admin.dashboardDate = event.target.value;
-      renderAdminTab();
-    });
-  } catch (error) {
-    content.innerHTML = `<p class="py-10 text-center text-sm text-red-500">${escapeHtml(error.message)}</p>`;
-  }
+  const dateInput = $('#dashboard-date');
+  if (dateInput) dateInput.addEventListener('change', (event) => {
+    state.admin.dashboardDate = event.target.value;
+    renderAdminTab();
+  });
 }
 
 function statCard(label, value) {
