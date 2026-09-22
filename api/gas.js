@@ -116,6 +116,7 @@ const ADMIN = new Set([
   'rfidCancelRegister',
   'rfidUnregisterCard',
   'rfidPoll',
+  'rfidLive',
 ]);
 
 export const config = { api: { bodyParser: false } };

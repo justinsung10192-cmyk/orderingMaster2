@@ -588,7 +588,7 @@ let rfidDeviceOnline = false;
 let rfidLastPollAt = 0;
 
 function stopRfidPolling() {
-  if (rfidTimer) { clearInterval(rfidTimer); rfidTimer = null; }
+  if (rfidTimer) { clearTimeout(rfidTimer); rfidTimer = null; }
   rfidMode = null;
 }
 
@@ -624,38 +624,37 @@ async function rfidToggleScan() {
   if (res) res.innerHTML = '<p class="rounded-xl bg-mist px-3 py-4 text-center text-sm text-slate-400">感應掃描已開啟，請學生將卡片靠近讀卡機…</p>';
   // 先建立基準（忽略舊事件），之後只處理「新」感應
   try { const r = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r.lastId) || 0; rfidDeviceOnline = Boolean(r.deviceOnline); } catch (_) {}
-  rfidTimer = setInterval(() => rfidTick(), 500);
+  rfidLongPoll();
   const btn = document.querySelector('[data-action="rfid-toggle-scan"]');
   if (btn) btn.textContent = '■ 停止感應';
   renderRfidStatus();
   toast('感應掃描已開啟。', 'success');
 }
 
-let rfidTickBusy = false;
-async function rfidTick() {
-  if (rfidTickBusy) return;
-  rfidTickBusy = true;
+async function rfidLongPoll() {
+  if (!rfidMode) return;
   try {
-    const r = await api('rfidPoll', { sinceId: rfidLastId });
+    const r = await api('rfidLive', { sinceId: rfidLastId, timeout: 8000 });
     rfidDeviceOnline = Boolean(r && r.deviceOnline);
     rfidLastPollAt = Date.now();
     renderRfidStatus();
-    if (!r || !r.events) return;
-    rfidLastId = Number(r.lastId) || rfidLastId;
-    for (const ev of r.events) {
-      if (rfidMode === 'scan' && ev.kind === 'scan' && ev.context) {
-        const res = $('#rfid-scan-result');
-        if (res) res.innerHTML = verifyResultHtml({ ...ev.context, intent: 'all' });
-        toast(`感應成功：${ev.seatNo} ${ev.studentName}`, 'success');
-      } else if (rfidMode === 'register' && ev.kind === 'registered') {
-        stopRfidPolling();
-        toast(`卡片 ${ev.uid} 已綁定到座號 ${ev.seatNo}`, 'success');
-        renderAdminRfid($('#admin-content'));
-        return;
-      }
+    if (r && r.event) {
+      rfidLastId = Number(r.lastId) || rfidLastId;
+      processRfidEvent(r.event);
     }
-  } catch (_) { /* 輪詢失敗忽略 */ } finally {
-    rfidTickBusy = false;
+  } catch (_) { /* 連線中斷，稍後重試 */ }
+  if (rfidMode) rfidTimer = setTimeout(() => rfidLongPoll(), 120);
+}
+
+function processRfidEvent(ev) {
+  if (rfidMode === 'scan' && ev.kind === 'scan' && ev.context) {
+    const res = $('#rfid-scan-result');
+    if (res) res.innerHTML = verifyResultHtml({ ...ev.context, intent: 'all' });
+    toast(`感應成功：${ev.seatNo} ${ev.studentName}`, 'success');
+  } else if (rfidMode === 'register' && ev.kind === 'registered') {
+    stopRfidPolling();
+    toast(`卡片 ${ev.uid} 已綁定到座號 ${ev.seatNo}`, 'success');
+    renderAdminRfid($('#admin-content'));
   }
 }
 
@@ -672,7 +671,7 @@ async function rfidStartRegister() {
     if (status) status.innerHTML = `<span class="font-bold text-stamp">註冊中：請將新卡片靠近讀卡機（座號 ${escapeHtml(r.seatNo)} ${escapeHtml(r.name)}）…</span>`;
     // 先建立基準（忽略舊事件）
     try { const r0 = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r0.lastId) || 0; rfidDeviceOnline = Boolean(r0.deviceOnline); } catch (_) {}
-    rfidTimer = setInterval(() => rfidTick(), 500);
+    rfidLongPoll();
     renderRfidStatus();
     toast('註冊模式已開啟，請感應卡片。', 'success');
   } catch (error) {

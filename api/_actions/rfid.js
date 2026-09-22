@@ -42,6 +42,10 @@ function normalizeUid(uid) {
   return String(uid || '').trim().toUpperCase().replace(/[\s:,-]/g, '');
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export const actions = {
   // 管理員：RFID 設定（裝置密鑰；首次呼叫自動產生，不依賴卡片表）
   async rfidGetConfig(data, ctx) {
@@ -193,6 +197,43 @@ export const actions = {
       events: out,
       lastId: sid(lastId),
       deviceOnline: Boolean(lastSeen && Date.now() - Number(lastSeen) < HEARTBEAT_WINDOW_MS),
+    };
+  },
+
+  // 管理員（手機）：長輪詢。有新感應事件就立刻回傳（等同即時推播），
+  // 否則最多等待 timeout 毫秒後回傳空結果。可大幅降低「感應→顯示」延遲。
+  async rfidLive(data, ctx) {
+    const classId = ctx.classId;
+    const sinceId = Number(data.sinceId) || 0;
+    const timeoutMs = Math.min(Math.max(Number(data.timeout) || 8000, 1000), 8000);
+    const startedAt = Date.now();
+    let lastSeen = null;
+    while (Date.now() - startedAt < timeoutMs) {
+      const [events, seen] = await Promise.all([
+        listRows('rfid_events', { classId, order: 'id', orderAscending: false, limit: 5 }),
+        getAppSetting(classId, 'rfid_last_seen'),
+      ]);
+      lastSeen = seen;
+      const fresh = events.filter((e) => Number(e.id) > sinceId).sort((a, b) => Number(a.id) - Number(b.id));
+      if (fresh.length) {
+        const e = fresh[fresh.length - 1];
+        const item = { id: sid(e.id), kind: e.kind, uid: e.uid || '', seatNo: e.seat_no || '', studentName: e.student_name || '', createdAt: e.created_at };
+        if (e.kind === 'scan' && e.user_id) {
+          try { item.context = await resolveContext(classId, e.user_id); } catch (_) { /* 略 */ }
+        }
+        return {
+          event: item,
+          lastId: sid(Number(e.id)),
+          deviceOnline: Boolean(seen && Date.now() - Number(seen) < HEARTBEAT_WINDOW_MS),
+        };
+      }
+      await sleep(200);
+    }
+    return {
+      event: null,
+      lastId: sid(sinceId),
+      deviceOnline: Boolean(lastSeen && Date.now() - Number(lastSeen) < HEARTBEAT_WINDOW_MS),
+      timeout: true,
     };
   },
 };
