@@ -359,7 +359,7 @@ let adminModPromise = null;
 async function getAdmin() {
   if (!adminModPromise) {
     adminModPromise = import('./admin.js').then(async (m) => {
-      await m.initAdmin({ state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript });
+      await m.initAdmin({ $, activityTime, compressImage, state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript });
       return m;
     });
   }
@@ -932,7 +932,7 @@ async function loadWalletDetail() {
 }
 
 /* ============================ 我的 QR / PIN ============================ */
-async // 用到時才動態載入外部腳本（掃碼／QR 庫），避免冷啟動就載入 1.3MB 重庫
+// 用到時才動態載入外部腳本（掃碼／QR 庫），避免冷啟動就載入 1.3MB 重庫
 const scriptCache = {};
 function loadScript(src) {
   if (scriptCache[src]) return scriptCache[src];
@@ -1418,30 +1418,30 @@ async function handleAction(action, target) {
     case 'del-item': openConfirm('刪除品項', '確定要刪除這個品項嗎？', async () => { await api('adminDeleteMenuItem', { itemId: target.getAttribute('data-item') }); render(); }); break;
     case 'ai-scan': (await getAdmin()).openAiScan(target.getAttribute('data-store')); break;
     case 'monthly-menu': (await getAdmin()).openMonthlyScan(); break;
-    case 'save-vendor-items': await saveVendorItems(); break;
+    case 'save-vendor-items': await (await getAdmin()).saveVendorItems(); break;
     case 'del-daily-item': openConfirm('刪除此品項', '將刪除此每日菜單品項，確定嗎？', async () => { await api('adminDeleteDailyMenuItem', { itemId: target.getAttribute('data-item') }); toast('已刪除。', 'success'); await refreshAdmin(); }); break;
     case 'clear-daily': { const month = state.admin.dailyMonth || todayString().slice(0, 7); openConfirm('一鍵刪除每日菜單', `將刪除 ${month} 月所有每日菜單（品項與對應場次），確定嗎？`, async () => { const r = await api('adminClearDailyMenus', { month }); toast(`已刪除 ${r.deletedItems} 個品項、${r.deletedSessions} 個場次${r.refundedOrders ? `、退款 ${r.refundedOrders} 筆訂單` : ''}。`, 'success'); await refreshAdmin(); }); break; }
-    case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); renderMonthlyList(); break; }
-    case 'del-monthly-item': { const ei = Number(target.getAttribute('data-index')); const ii = Number(target.getAttribute('data-item')); const entry = state.monthlyEntries[ei]; if (entry?.items) { entry.items.splice(ii, 1); renderMonthlyList(); } break; }
-    case 'add-monthly-item': { const ei = Number(target.getAttribute('data-index')); const entry = state.monthlyEntries[ei]; if (entry) { entry.items.push({ name: '', price: 0, dish: '' }); renderMonthlyList(); } break; }
-    case 'save-item': await saveItem(target.getAttribute('data-item')); break;
-    case 'save-ai-items': await saveAiItems(target.getAttribute('data-store')); break;
+    case 'del-monthly-entry': { const idx = Number(target.getAttribute('data-index')); if (Number.isInteger(idx)) state.monthlyEntries.splice(idx, 1); (await getAdmin()).renderMonthlyList(); break; }
+    case 'del-monthly-item': { const ei = Number(target.getAttribute('data-index')); const ii = Number(target.getAttribute('data-item')); const entry = state.monthlyEntries[ei]; if (entry?.items) { entry.items.splice(ii, 1); (await getAdmin()).renderMonthlyList(); } break; }
+    case 'add-monthly-item': { const ei = Number(target.getAttribute('data-index')); const entry = state.monthlyEntries[ei]; if (entry) { entry.items.push({ name: '', price: 0, dish: '' }); (await getAdmin()).renderMonthlyList(); } break; }
+    case 'save-item': await (await getAdmin()).saveItem(target.getAttribute('data-item')); break;
+    case 'save-ai-items': await (await getAdmin()).saveAiItems(target.getAttribute('data-store')); break;
     case 'del-ai-item': {
       state.aiItems.splice(Number(target.getAttribute('data-index')), 1);
-      renderAiList();
+      (await getAdmin()).renderAiList();
       break;
     }
     case 'del-ai-opt': {
       const idx = Number(target.getAttribute('data-index'));
       const oi = Number(target.getAttribute('data-opt'));
       const item = state.aiItems[idx];
-      if (item?.options) { item.options.splice(oi, 1); renderAiList(); }
+      if (item?.options) { item.options.splice(oi, 1); (await getAdmin()).renderAiList(); }
       break;
     }
     case 'add-ai-opt': {
       const idx = Number(target.getAttribute('data-index'));
       const item = state.aiItems[idx];
-      if (item) { item.options = item.options || []; item.options.push({ name: '', price: 0 }); renderAiList(); }
+      if (item) { item.options = item.options || []; item.options.push({ name: '', price: 0 }); (await getAdmin()).renderAiList(); }
       break;
     }
 
@@ -2025,3 +2025,49 @@ async function saveCalendarAiEvents() {
   toast(`已新增 ${created} 個事件${failed ? `、${failed} 個失敗` : ''}。`, failed ? 'info' : 'success');
 }
 
+/* ============================ 共用工具（供本模組與管理後台共用） ============================ */
+function activityTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+async function compressImage(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = dataUrl;
+  });
+  const maxDim = 1280;
+  let { width, height } = img;
+  if (Math.max(width, height) > maxDim) {
+    const scale = maxDim / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  const compressed = canvas.toDataURL('image/jpeg', 0.85);
+  return { imageBase64: compressed.split(',')[1], mimeType: 'image/jpeg' };
+}
+
+function doLogout() {
+  api('logout').catch(() => {});
+  state.token = '';
+  state.user = null;
+  state.boot = null;
+  localStorage.removeItem('meal.token');
+  render();
+}
+
+bootstrap();

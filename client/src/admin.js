@@ -8,9 +8,9 @@ import {
   escapeHtml, paymentLabel, paymentColor, buildCsv,
 } from './lunchDomain.js';
 
-let state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript;
+let state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript, $, activityTime, compressImage;
 export function initAdmin(ctx) {
-  ({ state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript } = ctx);
+  ({ state, api, busy, toast, closeModal, openConfirm, promptModal, modalRoot, refreshAdmin, render, renderView, bootstrap, loadScript, $, activityTime, compressImage } = ctx);
 }
 
 /* ============================ 管理（Admin） ============================ */
@@ -307,13 +307,6 @@ function activityColor(type) {
   if (type === '訂餐') return 'bg-ledger/10 text-ledger';
   if (type === '退款') return 'bg-amber-50 text-amber-600';
   return 'bg-slate-100 text-slate-500';
-}
-
-function activityTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '';
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 async function exportActivity() {
@@ -1484,34 +1477,6 @@ async function handleAiFile(event, storeId) {
 }
 
 // 上傳前先壓縮（縮小到最大 1280px 的 JPEG），避免超過 Vercel 請求上限並加速辨識
-async function compressImage(file) {
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-  const img = await new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = dataUrl;
-  });
-  const maxDim = 1280;
-  let { width, height } = img;
-  if (Math.max(width, height) > maxDim) {
-    const scale = maxDim / Math.max(width, height);
-    width = Math.round(width * scale);
-    height = Math.round(height * scale);
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-  const compressed = canvas.toDataURL('image/jpeg', 0.85);
-  return { imageBase64: compressed.split(',')[1], mimeType: 'image/jpeg' };
-}
-
 function showAiPreview(storeId, items) {
   if (!items.length) {
     toast('沒有辨識到任何品項。', 'error');
@@ -1752,18 +1717,6 @@ function promptChangePassword() {
   });
 }
 
-function doLogout() {
-  api('logout').catch(() => {});
-  state.token = '';
-  state.user = null;
-  state.boot = null;
-  localStorage.removeItem('meal.token');
-  render();
-}
-
-bootstrap();
-
-
 export { renderAdminView };
 export { renderAdminTab };
 export { openScanner };
@@ -1787,3 +1740,9 @@ export { exportActivity };
 export { exportCsv };
 export { viewOverdue };
 export { copyOverdue };
+
+export { saveVendorItems };
+export { saveItem };
+export { saveAiItems };
+export { renderAiList };
+export { renderMonthlyList };
