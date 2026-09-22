@@ -1239,9 +1239,13 @@ async function onClick(event) {
     if (nav === 'admin') state.adminTab = 'dashboard';
     render();
     renderView();
-    // 背景更新 bootstrap（不阻塞畫面；畫面先以快取渲染）
+    // 背景更新 bootstrap（不阻塞畫面；資料有變才重繪，避免重複載入）
+    const bootSig = JSON.stringify(state.boot);
     refreshBoot()
-      .then(() => { if (state.view === nav && state.user) renderView(); })
+      .then(() => {
+        if (state.view !== nav || !state.user) return;
+        if (JSON.stringify(state.boot) !== bootSig) renderView();
+      })
       .catch(() => {});
     return;
   }

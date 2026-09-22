@@ -25,12 +25,24 @@
 
 1. Arduino IDE → 函式庫管理員安裝 `MFRC522`。
 2. 開發板管理員安裝 `ESP8266` 套件，板子選 `WeMos D1 R2 & mini`。
-3. 開啟 `d1mini_rc522.ino`，修改最上方四個常數：
-   - `WIFI_SSID` / `WIFI_PASSWORD`：學校 WiFi。
-   - `SERVER_URL`：你的 Vercel 網址（例如 `https://orderingmaster2.vercel.app`）。
-   - `SECRET`：登入管理後台 →「RFID」分頁 → 複製「裝置密鑰」貼上。
-   - `STATION_ID`：班級識別碼，預設 `demo`。
+3. 開啟 `d1mini_rc522.ino`。四個網路常數（WiFi／網址／密鑰／站台）**不用改程式**，可直接用下方「WiFi 設定頁」修改並存到 EEPROM。
 4. 上傳，開啟序列監視器（115200）確認 `WiFi 已連線`。
+
+## WiFi 設定頁（內網設定，免重新燒錄）
+
+讀卡機在下列情況會自動開啟熱點 `OrderingRFID-Setup`（密碼 `88888888`）：
+- 連不上已存的 WiFi，或
+- 開機時按住設定鈕（`GPIO5/D1` 接 GND，或直接短接 D1 與 GND 開機）。
+
+手機連上該熱點後，開瀏覽器到 **http://192.168.4.1**（iOS 會自動跳出設定頁），即可修改：
+- WiFi SSID / 密碼
+- 伺服器網址（Vercel）
+- 裝置密鑰
+- 站台（班級）ID
+
+按下「儲存並重啟」即寫入 EEPROM 並重新連線。設定值會永久保存，之後不用再改。
+
+> 設定鈕接線（可選）：`D1 (GPIO5)` 一端接地、另一端接 GND。未接也可用（連線失敗時仍會自動進入設定頁）。
 
 ## 使用流程
 

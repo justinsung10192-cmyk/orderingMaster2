@@ -624,14 +624,17 @@ async function rfidToggleScan() {
   if (res) res.innerHTML = '<p class="rounded-xl bg-mist px-3 py-4 text-center text-sm text-slate-400">感應掃描已開啟，請學生將卡片靠近讀卡機…</p>';
   // 先建立基準（忽略舊事件），之後只處理「新」感應
   try { const r = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r.lastId) || 0; rfidDeviceOnline = Boolean(r.deviceOnline); } catch (_) {}
-  rfidTimer = setInterval(() => rfidTick(), 700);
+  rfidTimer = setInterval(() => rfidTick(), 500);
   const btn = document.querySelector('[data-action="rfid-toggle-scan"]');
   if (btn) btn.textContent = '■ 停止感應';
   renderRfidStatus();
   toast('感應掃描已開啟。', 'success');
 }
 
+let rfidTickBusy = false;
 async function rfidTick() {
+  if (rfidTickBusy) return;
+  rfidTickBusy = true;
   try {
     const r = await api('rfidPoll', { sinceId: rfidLastId });
     rfidDeviceOnline = Boolean(r && r.deviceOnline);
@@ -651,7 +654,9 @@ async function rfidTick() {
         return;
       }
     }
-  } catch (_) { /* 輪詢失敗忽略 */ }
+  } catch (_) { /* 輪詢失敗忽略 */ } finally {
+    rfidTickBusy = false;
+  }
 }
 
 async function rfidStartRegister() {
@@ -667,7 +672,7 @@ async function rfidStartRegister() {
     if (status) status.innerHTML = `<span class="font-bold text-stamp">註冊中：請將新卡片靠近讀卡機（座號 ${escapeHtml(r.seatNo)} ${escapeHtml(r.name)}）…</span>`;
     // 先建立基準（忽略舊事件）
     try { const r0 = await api('rfidPoll', { sinceId: 0 }); rfidLastId = Number(r0.lastId) || 0; rfidDeviceOnline = Boolean(r0.deviceOnline); } catch (_) {}
-    rfidTimer = setInterval(() => rfidTick(), 700);
+    rfidTimer = setInterval(() => rfidTick(), 500);
     renderRfidStatus();
     toast('註冊模式已開啟，請感應卡片。', 'success');
   } catch (error) {
