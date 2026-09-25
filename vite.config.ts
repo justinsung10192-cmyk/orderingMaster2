@@ -22,7 +22,7 @@ function resolveVersion() {
 }
 
 // 精簡建置設定：只打包 client 的靜態前端（index.html + src/app.js）。
-// 後端資料由 Google Apps Script 提供，透過 api/gas.js 同網域代理。
+// 後端資料由 Vercel Serverless Functions（api/gas.js）+ Supabase 提供，透過 api/gas.js 同網域代理。
 export default defineConfig({
   plugins: [tailwindcss()],
   root: path.resolve(process.cwd(), "client"),

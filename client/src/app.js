@@ -45,7 +45,7 @@ const state = {
 
 const ICONS = { order: '⌑', vote: '♡', calendar: '▦', wallet: '¤', admin: '✓', settings: '☷' };
 
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.2.0'; // 由 vite.config.ts 於建置時注入
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '3.5.3'; // 由 vite.config.ts 於建置時注入
 
 /* ============================ API ============================ */
 async function api(action, data = {}, onProgress) {

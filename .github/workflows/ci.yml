@@ -1,0 +1,46 @@
+name: CI
+
+# 這個專案原本沒有任何 CI。這個 workflow 只做「不能讓它退化」的事：
+#   1. 單元測試（零依賴，node:test）
+#   2. 資料庫遷移規則檢查（命名/編號/不可破壞資料）
+#   3. 遷移 bundle 是否與遷移檔同步（防止「改了遷移卻沒重跑產生」）
+#   4. 文件與程式碼一致性（座號、版本號、AI 模型、索引）
+#
+# 不部署、不碰 Supabase、不碰 main 分支的資料。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 測試與一致性
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 安裝依賴
+        run: npm ci
+
+      - name: 單元測試
+        run: npm test
+
+      - name: 資料庫遷移檢查（含 bundle 同步）
+        run: npm run db:verify
+
+      - name: 文件與程式碼一致性
+        run: npm run check:consistency
+
+      - name: 前端建置（確認網站仍可建置）
+        run: npm run build

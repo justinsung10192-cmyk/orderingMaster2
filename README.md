@@ -17,7 +17,7 @@ Supabase PostgreSQL ──┬─ 金流原子運算（fn_settle_order / fn_topup
                       ├─ 37 組預設帳號（首次登入強制改密碼與姓名）
                       ├─ QR + 4 位 PIN 核銷（verification_records）
                       └─ pg_cron 每小時：截止提醒 → /api/cron
-AI 辨識（Gemini 1.5 Flash / GPT-4o-mini）：api/_actions/ai.js（Server 端持金鑰）
+AI 辨識（Gemini Flash 模型鏈，自動退回 / GPT-4o-mini 備援）：api/_actions/ai.js（Server 端持金鑰）
 推播（Web Push／VAPID）：訂餐開始、即將截止、每日欠繳催繳
 即時同步：前端背景自動輪詢（30 秒）＋ 操作後立即刷新，資料更新時不中斷使用者操作
 ```

@@ -784,6 +784,20 @@ create table if not exists public.changelog (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_changelog on public.changelog (class_id, created_at desc);
+-- ---------------------------------------------------------------------------
+-- 效能索引補齊（v4，2026-09）：以下索引原本只存在於 migration_perf_indexes.sql，
+-- 沒有寫進本檔，導致「照本檔新建的資料庫特別慢」。此處為純新增，不影響查詢結果。
+-- 由 tests/consistency.test.js 強制「遷移中的索引都必須出現在本檔」。
+-- ---------------------------------------------------------------------------
+create index if not exists idx_users_student_no     on public.users (student_no);
+create index if not exists idx_users_seat_no        on public.users (seat_no);
+create index if not exists idx_menu_items_class_store on public.menu_items (class_id, store_id);
+create index if not exists idx_orders_class_updated on public.orders (class_id, updated_at desc);
+create index if not exists idx_transactions_order   on public.transactions (order_id);
+create index if not exists idx_auth_tokens_user     on public.auth_tokens (user_id);
+create index if not exists idx_push_subs_class      on public.push_subscriptions (class_id);
+create index if not exists idx_push_subs_user       on public.push_subscriptions (user_id);
+
 
 -- 部分繳費（現金，可只繳一部分）
 create or replace function public.fn_partial_pay(
