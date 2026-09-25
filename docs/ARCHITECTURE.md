@@ -124,7 +124,22 @@ supabase/migrations/0001_schema_migrations.sql      追蹤表（哪一版跑過�
 supabase/migrations/0002_performance_indexes.sql    補齊 8 個缺失索引
 supabase/migrations/0003_audit_log.sql              append-only 事件紀錄
 supabase/migrations/0004_request_id_idempotency.sql 金流冪等鍵（地基）
+supabase/migrations/0005_enable_rls_deny_all.sql    RLS 全拒絕（前端不用 anon key，安全）
 ```
+
+### 新資料庫建置順序（重要）
+
+```text
+1) supabase/schema.sql                        ← 建表 + 全部索引
+2) supabase/migrations/_generated_bundle.sql  ← 0001～0005（可重複執行）
+3) （選用但建議）docs/how-to-dump-functions.sql ← 從「現有線上庫」dump 金額函式真實定義，
+                                                  存成 0006，確保新庫行為與現在完全一致
+```
+
+**為什麼第 3 步很重要**：`schema.sql` 內 7 支函式被重複定義了 16 次，且有 9 個舊的
+`migration_*.sql` 各自改寫過同一批函式（`fn_settle_order` 一個就被改了 6 次）。
+Postgres 是「後面覆蓋前面」，所以「只跑 schema.sql 會得到什麼」和「線上實際在跑什麼」
+**可能不同**。不要猜，把線上的 `pg_get_functiondef` dump 出來變成 0006。
 
 ```bash
 npm run db:list              # 看有哪些遷移與 checksum

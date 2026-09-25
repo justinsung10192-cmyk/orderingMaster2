@@ -52,3 +52,4 @@ npm run db:bundle
 | 0002 | `0002_performance_indexes.sql` | 補齊 8 個缺失索引（原本只存在於舊的 perf 檔案） | 無（純新增索引） |
 | 0003 | `0003_audit_log.sql` | 可稽核的 append-only 事件紀錄 + 防呆 trigger | 低（trigger 內建錯誤吞除） |
 | 0004 | `0004_request_id_idempotency.sql` | 金流冪等鍵欄位（`request_id`）與唯一索引 | 無（可為 null 的欄位） |
+| 0005 | `0005_enable_rls_deny_all.sql` | 啟用 RLS 且不建政策＝全拒絕（service_role 不受影響） | 低（僅影響 anon/authenticated 角色） |
