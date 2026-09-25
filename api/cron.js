@@ -1,6 +1,7 @@
 // 排程端點：由 Supabase pg_cron 每小時呼叫（?secret=CRON_SECRET）。
 // 1) 訂餐開始推播（補漏） 2) 即將截止推播 3) 每日欠繳催繳推播
 import { readRawBody, sendJson } from './_lib/util.js';
+import { verifyCronSecret, usesLegacyQuerySecret } from './_lib/cronAuth.js';
 import { supabase, findOne, listRowsIn, updateRows, getAppSetting, setAppSetting } from './_lib/db.js';
 import { sendPushToUser, sendPushToClass } from './_lib/push.js';
 import { outstandingOf } from './_lib/serialize.js';
@@ -17,10 +18,12 @@ function fmtTime(iso) {
 }
 
 export default async function handler(req, res) {
-  const url = new URL(req.url, 'http://localhost');
-  const secret = url.searchParams.get('secret');
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-    return sendJson(res, { ok: false, error: 'unauthorized' });
+  if (!verifyCronSecret(req)) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    return sendJson(res, { ok: false, error: 'unauthorized', code: 'UNAUTHORIZED' }, 401);
+  }
+  if (usesLegacyQuerySecret(req)) {
+    console.warn('[cron] 偵測到以 query string 傳遞密鑰，建議改用 Authorization: Bearer（密鑰會留在 access log）。');
   }
   try {
     await readRawBody(req);

@@ -61,12 +61,12 @@ export function toIso(value) {
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
-export async function readRawBody(req) {
+export async function readRawBody(req, maxBytes = 12 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
     let exceeded = false;
-    const MAX = 12 * 1024 * 1024; // 12MB 上限（AI 圖檔 base64 上限 8MB + JSON 包裝）
+    const MAX = Number(maxBytes) > 0 ? Number(maxBytes) : 12 * 1024 * 1024; // 預設 12MB（AI 圖檔 base64），可由呼叫端收斂
     req.on('data', (chunk) => {
       total += chunk.length;
       if (total > MAX) {
@@ -83,10 +83,10 @@ export async function readRawBody(req) {
   });
 }
 
-export function sendJson(res, payload) {
+export function sendJson(res, payload, status = 200) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.status(200).send(JSON.stringify(payload));
+  res.status(status).send(JSON.stringify(payload));
 }
 
 // ===== 週別工具（週一至週日，ISO 週） =====
